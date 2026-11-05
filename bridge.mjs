@@ -1,0 +1,1539 @@
+// Ducoro connector bridge — the Bun main module of magpie-ducoro.
+//
+// Runs inside magpie's plugin host. Watches the three artifacts the Ducoro
+// agent declaration (ducoro.agent.js) produces and keeps Ducoro in sync
+// through `ducoro-cli`:
+//
+//   ~/.ducoro/magpie-agent.json   gateway url + per-agent key + selected model
+//                                 -> one OpenAI-compatible Connection
+//                                    (preset custom-openai-compat, runtime pi-agent)
+//   ~/.ducoro/magpie-mcp.json     library MCP servers, claude format
+//                                 -> global MCP server definitions
+//   ~/.ducoro/magpie-skills/      library skill bundles (links or copies)
+//                                 -> imported skill bundles
+//
+// Magpie library.json is the authoritative per-agent resource selection.
+// Never add the all-plugin /mcp/magpie/tools endpoint automatically.
+//
+// Everything it creates is tracked in a state file under magpie's config
+// directory, so only this plugin ever touches what it created. Secrets never
+// sit in Ducoro's MCP definitions in plaintext: env/header values that
+// ducoro-cli cannot carry inline (they contain commas) are stored in the
+// encrypted credential store and referenced as {{credentials.slug}}.
+//
+// This file must export exactly one plugin function (plus _internal helpers).
+
+import { spawn as nodeSpawn } from "node:child_process"
+import { watch as fsWatch } from "node:fs"
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  rm,
+  writeFile,
+} from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { homedir, tmpdir } from "node:os"
+import { basename, dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
+
+import { createTotalSync } from "./total.mjs"
+
+const HOME = homedir()
+
+const pathFromEnv = (name, dflt) => {
+  const v = process.env[name]
+  return v && v.trim() ? v.trim() : dflt
+}
+
+const DEFAULT_PATHS = {
+  bridge: join(HOME, ".ducoro", "magpie-agent.json"),
+  mcp: join(HOME, ".ducoro", "magpie-mcp.json"),
+  skills: join(HOME, ".ducoro", "magpie-skills"),
+}
+
+export const DEFAULTS = {
+  cli: "ducoro-cli",
+  connectionSlug: "magpie-ducoro",
+  connectionName: "Magpie gateway",
+  syncConnection: true,
+  syncMcp: true,
+  syncSkills: true,
+  syncInstructions: true,
+  syncSubagents: true,
+  targetAgents: [],
+  subagentNames: [],
+  syncLibraryMcp: true,
+  // Legacy options are only used to identify an old owned aggregate for removal.
+  syncPluginTools: false,
+  mcpToolsSlug: "magpie-tools",
+  mcpToolsName: "Magpie plugin tools",
+  mcpPrefix: "magpie-",
+  skillsScope: "global", // "global" or an agent id
+  prune: true,
+  onDisconnect: "keep", // "keep" | "remove"
+  intervalMs: 120_000,
+  dryRun: false,
+}
+
+// ---------------------------------------------------------------- helpers
+
+const sha256 = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 20)
+
+const slugify = (s) =>
+  String(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "x"
+
+// Keep existing canonical names readable. Lossy normalization needs a stable
+// suffix: a_b, a-b, A-B and long/non-ASCII names must never share an identity.
+const mcpSlug = (name, prefix) => {
+  const source = String(name)
+  const simple = slugify(source)
+  return prefix + (source === simple && !/-[a-f0-9]{12}$/.test(source)
+    ? simple
+    : `${simple.slice(0, 35).replace(/-+$/, "")}-${sha256(source).slice(0, 12)}`)
+}
+
+const str = (v) => (typeof v === "string" ? v.trim() : "")
+
+const normalizeModel = (model) => {
+  if (!model) return null
+  if (typeof model === "string") return model.trim() || null
+  if (typeof model === "object") return str(model.id) || null
+  return null
+}
+
+// magpie hands `models` to connect() in the same shape as `model`; accept
+// arrays of objects/strings and plain id-keyed objects alike.
+const modelIds = (models) => {
+  if (Array.isArray(models))
+    return models
+      .map((m) => (typeof m === "string" ? m : str(m?.id)))
+      .filter(Boolean)
+  if (models && typeof models === "object") return Object.keys(models).filter(Boolean)
+  return []
+}
+
+// ~/.ducoro/magpie-mcp.json is written in claude format: { mcpServers: {...} }
+const parseLibMcp = (json) => {
+  if (!json || typeof json !== "object") return {}
+  const servers = json.mcpServers
+  return servers && typeof servers === "object" ? servers : {}
+}
+
+// claude-format server definition -> our internal shape (null when unmappable)
+const mapServer = (name, def, prefix) => {
+  if (!def || typeof def !== "object") return null
+  if (def.disabled === true || def.enabled === false) return null
+  const slug = mcpSlug(name, prefix)
+  const type = str(def.type).toLowerCase()
+  const headers = def.headers && typeof def.headers === "object"
+    ? Object.entries(def.headers).map(([k, v]) => [k, String(v)])
+    : []
+  if (type === "http" || type === "sse" || (!def.command && def.url)) {
+    const url = str(def.url)
+    if (!url) return null
+    return { slug, name, transport: type === "sse" ? "sse" : "http", url, headers, env: [], command: null, args: null }
+  }
+  if (def.command) {
+    const args = Array.isArray(def.args) ? def.args.map((a) => String(a)) : []
+    const env = def.env && typeof def.env === "object"
+      ? Object.entries(def.env).map(([k, v]) => [k, String(v)])
+      : []
+    return { slug, name, transport: "stdio", command: String(def.command), args, env, url: null, headers: [] }
+  }
+  return null
+}
+
+const defHash = (def) => {
+  // env/headers are key-value maps: hash them order-insensitively; args keep
+  // their order (it is semantic).
+  const canon = (pairs) =>
+    JSON.stringify(
+      (pairs ?? [])
+        .map(([k, v]) => [k, v])
+        .sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)),
+    )
+  return sha256(
+    JSON.stringify({
+      name: def.name,
+      transport: def.transport,
+      command: def.command,
+      args: def.args,
+      url: def.url,
+      headers: canon(def.headers),
+      env: canon(def.env),
+      disabledTools: [...(def.disabledTools ?? [])].sort(),
+    }),
+  )
+}
+
+// SKILL.md frontmatter name, falling back to the directory name
+const skillName = (md, fallback) => {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(md))
+  if (fm) {
+    const m = /^name:\s*["']?([^"'\n]+?)["']?\s*$/m.exec(fm[1])
+    if (m && m[1].trim()) return m[1].trim()
+  }
+  return fallback
+}
+
+// Ducoro's dead-link validator treats every backticked dotted token as a
+// file. Versions (0.9.x) and Windows executable names (heptabase.cmd) are
+// prose, not bundle files. HTML code keeps the same rendered instructions
+// without creating fake companion files or hiding missing relative paths.
+const compatibleSkillMarkdown = (md, fileNames) => md.replace(/`([^`\n]+)`/g, (match, token) => {
+  if (fileNames.has(token)) return match
+  const version = /^v?\d+(?:\.\d+)+(?:\.[xX*])?(?:-[a-zA-Z0-9.-]+)?$/.test(token)
+  const executable = /^[a-zA-Z0-9_-]+\.(?:cmd|exe|bat)$/i.test(token)
+  return version || executable ? `<code>${token}</code>` : match
+})
+
+const sameSet = (a, b) => {
+  const norm = (x) => (Array.isArray(x) ? [...x].map(String).sort() : [])
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
+}
+
+const sameObj = (a, b) => {
+  const norm = (x) => {
+    if (!x || typeof x !== "object" || Array.isArray(x)) return ""
+    return Object.keys(x)
+      .sort()
+      .map((k) => `${k}=${x[k]}`)
+      .join("|")
+  }
+  return norm(a) === norm(b)
+}
+
+const NOT_FOUND_RE = /not_found|notfound|no (mcp server|connection|skill|credential)|no such|unknown (slug|connection)/i
+
+// ---------------------------------------------------------------- engine
+
+const createEngine = (input = {}, options = {}) => {
+  const opts = { ...DEFAULTS }
+  const merge = (o) => {
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      for (const [k, v] of Object.entries(o)) if (v !== undefined && k in DEFAULTS) opts[k] = v
+    }
+  }
+  merge(options)
+  merge(input?.magpie?.options)
+  merge(input?.magpie?.option)
+
+  const dryRun = opts.dryRun === true || opts.dryRun === "true"
+
+  const configDir = str(input?.directory) || str(input?.worktree) ||
+    join(pathFromEnv("XDG_CONFIG_HOME", join(HOME, ".config")), "magpie")
+  const paths = {
+    bridge: pathFromEnv("DUCORO_BRIDGE_FILE", DEFAULT_PATHS.bridge),
+    mcp: pathFromEnv("DUCORO_BRIDGE_MCP_FILE", DEFAULT_PATHS.mcp),
+    skills: pathFromEnv("DUCORO_BRIDGE_SKILLS_DIR", DEFAULT_PATHS.skills),
+    library: pathFromEnv("DUCORO_BRIDGE_LIBRARY_FILE", join(configDir, "library.json")),
+    librarySkills: pathFromEnv("DUCORO_BRIDGE_LIBRARY_SKILLS_DIR", join(configDir, "library", "skills")),
+  }
+  const stateDir = pathFromEnv(
+    "DUCORO_BRIDGE_STATE_DIR",
+    join(configDir, "ducoro-bridge"),
+  )
+  const stateFile = join(stateDir, "state.json")
+  paths.instructions = pathFromEnv("DUCORO_BRIDGE_INSTRUCTIONS_FILE", join(HOME, ".ducoro", "magpie-instructions.md"))
+  paths.ducoroHome = pathFromEnv("DUCORO_BRIDGE_DUCORO_HOME", join(HOME, ".ducoro"))
+  paths.report = join(stateDir, "total-status.json")
+
+  const knownSecrets = new Set()
+  const rememberSecret = (value) => {
+    if (value !== undefined && value !== null && String(value)) knownSecrets.add(String(value))
+  }
+  const redact = (value) => {
+    let out = String(value)
+    for (const secret of [...knownSecrets].sort((a, b) => b.length - a.length)) out = out.split(secret).join("[redacted]")
+    return out.replace(/https?:\/\/[^\s<>"')]+/g, (text) => {
+      try {
+        const url = new URL(text)
+        if (url.username || url.password) { url.username = "redacted"; url.password = "redacted" }
+        for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, "redacted")
+        if (url.hash) url.hash = "redacted"
+        return url.toString()
+      } catch { return "[redacted-url]" }
+    })
+  }
+  const log = (...a) => console.log("[ducoro-bridge]", ...a.map(redact))
+  const warned = new Set()
+  const warnOnce = (key, msg) => {
+    if (warned.has(key)) return
+    warned.add(key)
+    log("note:", msg)
+  }
+
+  // ------------------------------------------------------------- state
+
+  let state = { v: 2, connection: null, mcp: {}, skills: {} }
+  let stateLoaded = false
+
+  const loadState = async () => {
+    if (stateLoaded) return
+    stateLoaded = true
+    try {
+      const raw = JSON.parse(await readFile(stateFile, "utf8"))
+      if (raw && typeof raw === "object" && (raw.v === 1 || raw.v === 2)) {
+        state = {
+          v: 2,
+          connection: raw.connection ?? null,
+          mcp: raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {},
+          total: raw.total,
+          skills: raw.skills && typeof raw.skills === "object" ? raw.skills : {},
+        }
+      }
+    } catch {}
+  }
+
+  const saveState = async () => {
+    if (dryRun) return
+    try {
+      await mkdir(stateDir, { recursive: true })
+      const temp = `${stateFile}.${process.pid}.tmp`
+      await writeFile(temp, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", mode: 0o600 })
+      await rename(temp, stateFile)
+    } catch (e) {
+      log("cannot save state:", e?.message ?? e)
+      throw e
+    }
+  }
+
+  // --------------------------------------------------------------- cli
+
+  let activeGatewayController = null
+  const gatewayAbortError = () => Object.assign(new Error("gateway sync superseded by a resource change"), { name: "AbortError", code: "GATEWAY_SUPERSEDED" })
+  const interruptGatewayReads = () => activeGatewayController?.abort()
+
+  const run = (args, { stdin, timeoutMs = 90_000 } = {}) =>
+    new Promise((resolve, reject) => {
+      const gatewaySignal = args[0] === "connections" ? activeGatewayController?.signal : null
+      if (gatewaySignal?.aborted) { reject(gatewayAbortError()); return }
+      const abortableRead = gatewaySignal && ["catalog", "get"].includes(args[1])
+      const full = [...args, "--json"]
+      rememberSecret(stdin)
+      for (let i = 0; i < args.length - 1; i++) {
+        if (["--env", "--header", "--args", "--url", "--base-url"].includes(args[i])) {
+          rememberSecret(args[i + 1])
+          for (const pair of ["--env", "--header", "--args"].includes(args[i]) ? String(args[i + 1]).split(",") : []) {
+            const eq = pair.indexOf("=")
+            rememberSecret(eq >= 0 ? pair.slice(eq + 1) : pair)
+          }
+        }
+      }
+      if (dryRun) {
+        // Command values can contain secrets even in positional args or URLs.
+        // Preview the operation and flag names only, never their values.
+        let valueNext = false
+        const preview = full.map((arg, i) => {
+          if (i < 2) return arg
+          if (valueNext) { valueNext = false; return "[redacted]" }
+          if (/^--[a-z][a-z0-9-]*$/.test(arg)) {
+            valueNext = !["--stdin", "--json"].includes(arg)
+            return arg
+          }
+          return "[redacted]"
+        })
+        log("dry-run:", opts.cli, ...preview, stdin !== undefined ? "(secret via stdin)" : "")
+        resolve({ ok: true, code: 0, stdout: "", stderr: "", json: null })
+        return
+      }
+      let child
+      try {
+        child = nodeSpawn(opts.cli, full, {
+          stdio: [stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+        })
+      } catch (e) {
+        resolve({ ok: false, code: -1, stdout: "", stderr: String(e?.message ?? e), json: null })
+        return
+      }
+      let stdout = ""
+      let stderr = ""
+      let timedOut = false
+      let aborted = false
+      let done = false
+      const finish = (code) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        if (abortableRead) gatewaySignal.removeEventListener("abort", onAbort)
+        if (aborted) { reject(gatewayAbortError()); return }
+        let json = null
+        try { json = JSON.parse(stdout.trim()) } catch {}
+        resolve({ ok: code === 0, code, stdout, stderr, json })
+      }
+      const onAbort = () => {
+        aborted = true
+        try { child.kill("SIGKILL") } catch {}
+        finish(-1)
+      }
+      const timer = setTimeout(() => {
+        timedOut = true
+        try { child.kill("SIGKILL") } catch {}
+      }, timeoutMs)
+      child.stdout?.on("data", (d) => { stdout += d })
+      child.stderr?.on("data", (d) => { stderr += d })
+      child.on("error", (e) => { stderr = String(e?.message ?? e); finish(-1) })
+      if (abortableRead) gatewaySignal.addEventListener("abort", onAbort, { once: true })
+      // A CLI that exits before reading stdin must not crash the shared host.
+      child.stdin?.on("error", (e) => { stderr += `\n${e.message}` })
+      if (stdin !== undefined) {
+        child.stdin.end(stdin + "\n")
+      }
+      child.on("close", (code) => {
+        if (timedOut) {
+          stderr = `timed out after ${timeoutMs} ms\n` + stderr
+          finish(-1)
+        } else {
+          finish(code ?? -1)
+        }
+      })
+    })
+
+  const errMsg = (r) => {
+    const j = r.json?.error?.message ?? r.json?.error?.code
+    if (j) return redact(j)
+    const line = (r.stderr || r.stdout || "").trim().split("\n")[0]
+    return redact(line || `exit code ${r.code}`)
+  }
+
+  const isNotFound = (r) =>
+    !r.ok && (NOT_FOUND_RE.test(r.stderr) || NOT_FOUND_RE.test(r.stdout) || NOT_FOUND_RE.test(errMsg(r)))
+
+  const readJson = async (p) => {
+    try {
+      return JSON.parse(await readFile(p, "utf8"))
+    } catch {
+      return null
+    }
+  }
+
+  const readJsonDetailed = async (path) => {
+    try { return { ok: true, value: JSON.parse(await readFile(path, "utf8")) } }
+    catch (e) { return { ok: false, missing: e.code === "ENOENT" } }
+  }
+
+  // ------------------------------------------------- capability mapping
+
+  // Map magpie model ids ("zcode/GLM-5.3-Flash") to Ducoro catalog entries
+  // ("zai/glm-5.3-flash") so explicit thinking levels resolve. Best effort:
+  // refs are optional in Ducoro.
+  let catalogCache = null
+  let catalogAt = 0
+
+  const loadCatalog = async () => {
+    if (catalogCache && Date.now() - catalogAt < 5 * 60_000) return catalogCache
+    const r = await run(["connections", "catalog"], { timeoutMs: 30_000 })
+    if (!r.ok || !Array.isArray(r.json)) {
+      if (!catalogCache) log("connections catalog unavailable; capability refs skipped")
+      return catalogCache
+    }
+    catalogCache = r.json
+    catalogAt = Date.now()
+    return catalogCache
+  }
+
+  const refsFor = async (ids) => {
+    if (!ids.length) return {}
+    const cat = await loadCatalog()
+    if (!cat) return {}
+    const refs = {}
+    for (const id of ids) {
+      const i = id.indexOf("/")
+      if (i <= 0) continue
+      const prov = id.slice(0, i).toLowerCase()
+      const rest = id.slice(i + 1).toLowerCase()
+      const hit =
+        cat.find((c) => String(c?.provider ?? "").toLowerCase() === prov && String(c?.id ?? "").toLowerCase() === rest) ??
+        cat.find((c) => String(c?.id ?? "").toLowerCase() === rest)
+      if (hit?.provider && hit?.id) refs[id] = `${hit.provider}/${hit.id}`
+    }
+    return refs
+  }
+
+  // -------------------------------------------------------- connection
+
+  const getConnection = async (slug) => {
+    const r = await run(["connections", "get", slug], { timeoutMs: 30_000 })
+    if (r.ok) {
+      const connection = r.json?.connection ?? r.json
+      if (dryRun || (connection && typeof connection === "object" && !Array.isArray(connection))) return connection
+      throw new Error("connections get returned an unknown response")
+    }
+    if (isNotFound(r)) return null
+    throw new Error(`connections get ${slug} failed: ${errMsg(r)}`)
+  }
+
+  const connectionArgs = (want) => {
+    const a = []
+    if (want.model) a.push("--model", want.model)
+    if (want.models.length) a.push("--models", want.models.join(","))
+    const refs = Object.entries(want.refs)
+    if (refs.length) a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
+    return a
+  }
+
+  const createConnection = async (slug, want, key) => {
+    const r = await run(
+      [
+        "connections", "add-apikey", "custom-openai-compat",
+        "--slug", slug,
+        "--name", want.name,
+        "--base-url", want.baseUrl,
+        ...connectionArgs(want),
+        "--stdin",
+      ],
+      { stdin: key },
+    )
+    if (!r.ok) {
+      log(`creating connection ${slug} failed (kept for retry): ${errMsg(r)}`)
+      requestRetry("gateway-sync")
+      return false
+    }
+    log(`connection ${slug} created -> ${want.baseUrl}${want.model ? ` (model ${want.model})` : ""}`)
+    return true
+  }
+
+  const updateConnection = async (slug, want, key) => {
+    const r = await run(
+      [
+        "connections", "update-apikey", slug,
+        "--name", want.name,
+        "--base-url", want.baseUrl,
+        ...connectionArgs(want),
+        "--stdin",
+      ],
+      { stdin: key },
+    )
+    if (!r.ok) {
+      log(`updating connection ${slug} failed (kept for retry): ${errMsg(r)}`)
+      requestRetry("gateway-sync")
+      return false
+    }
+    log(`connection ${slug} updated -> ${want.baseUrl}${want.model ? ` (model ${want.model})` : ""}`)
+    return true
+  }
+
+  const syncConnection = async ({ gwUrl, gwV1, key, model, models }) => {
+    const slug = String(opts.connectionSlug)
+    const want = {
+      name: String(opts.connectionName),
+      baseUrl: gwV1,
+      model,
+      models,
+      refs: await refsFor(models),
+    }
+    const cur = await getConnection(slug)
+    const keyHash = sha256(key)
+
+    if (!cur) {
+      if (await createConnection(slug, want, key)) {
+        state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
+        await saveState()
+      }
+      return
+    }
+
+    if (!state.connection || state.connection.slug !== slug) {
+      // A profile with this slug exists but this plugin did not create it.
+      // Adopt it only when it already points at this gateway; never touch a
+      // stranger's route.
+      if (str(cur.baseUrl) === want.baseUrl) {
+        log(`adopting existing connection ${slug}`)
+        state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: str(cur.defaultModel) }
+      } else {
+        warnOnce(
+          `conn:${slug}`,
+          `connection "${slug}" exists and was not created by this plugin; ` +
+            `pick another connectionSlug option to let the bridge create its own`,
+        )
+        return
+      }
+    }
+
+    const changed =
+      state.connection.keyHash !== keyHash ||
+      str(cur.baseUrl) !== want.baseUrl ||
+      str(cur.defaultModel) !== want.model ||
+      !sameSet(cur.models, want.models) ||
+      !sameObj(cur.modelCapabilityRefs, want.refs)
+    if (!changed) return
+
+    if (await updateConnection(slug, want, key)) {
+      state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
+      await saveState()
+    }
+  }
+
+  const removeConnection = async () => {
+    const slug = state.connection?.slug
+    if (!slug) return
+    const r = await run(["connections", "rm", slug], { timeoutMs: 30_000 })
+    if (r.ok || isNotFound(r)) {
+      log(`connection ${slug} removed`)
+      state.connection = null
+      await saveState()
+    } else {
+      log(`removing connection ${slug} failed: ${errMsg(r)}`)
+      requestRetry("gateway-sync")
+    }
+  }
+
+  // --------------------------------------------------------------- mcp
+
+  const listMcpSlugs = async () => {
+    const r = await run(["mcp", "list"], { timeoutMs: 30_000 })
+    if (!r.ok) {
+      log(`mcp list failed: ${errMsg(r)}`)
+      requestRetry("mcp-sync")
+      return null
+    }
+    const arr = Array.isArray(r.json?.servers) ? r.json.servers : Array.isArray(r.json) ? r.json : null
+    if (!arr) {
+      if (dryRun) return new Map()
+      log("mcp list returned an unknown response; resource changes postponed")
+      requestRetry("mcp-sync")
+      return null
+    }
+    return new Map(arr.filter((s) => str(s?.slug)).map((s) => [s.slug, s]))
+  }
+
+  // ducoro-cli cannot carry commas inside single-use --env/--header/--args
+  // flags; comma-bearing values move into the encrypted credential store and
+  // are referenced as {{credentials.slug}}.
+  const materializeSecrets = async (def) => {
+    def.credentialRefs = []
+    const conv = async (pairs, kind) => {
+      const out = []
+      for (const [k, v] of pairs) {
+        if (v.includes(",")) {
+          // ducoro-cli credential refs must be "<provider>:<variant>" in
+          // kebab-case halves
+          const cslug = `${def.slug}:${kind}-${slugify(k).slice(0, 25)}-${sha256(k).slice(0, 12)}`
+          const r = dryRun
+            ? { ok: true }
+            : await run(["credentials", "put", "--slug", cslug, "--kind", "mcp_credential", "--stdin"], {
+                stdin: v,
+                timeoutMs: 30_000,
+              })
+          if (!r.ok) return null
+          out.push([k, `{{credentials.${cslug}}}`])
+          def.credentialRefs.push(cslug)
+        } else {
+          out.push([k, v])
+        }
+      }
+      return out
+    }
+    if (def.env?.length) {
+      const env = await conv(def.env, "env")
+      if (!env) return false
+      def.env = env
+    }
+    if (def.headers?.length) {
+      const headers = await conv(def.headers, "hdr")
+      if (!headers) return false
+      def.headers = headers
+    }
+    return true
+  }
+
+  const mcpServerArgs = (def, patch = false) => {
+    const a = []
+    if (def.transport === "stdio") {
+      a.push("--command", def.command)
+      if (patch || def.args?.length) a.push("--args", (def.args ?? []).join(","))
+      if (patch || def.env?.length) a.push("--env", (def.env ?? []).map(([k, v]) => `${k}=${v}`).join(","))
+      if (patch) a.push("--url", "", "--header", "")
+    } else {
+      a.push("--url", def.url)
+      if (patch || def.headers?.length) a.push("--header", (def.headers ?? []).map(([k, v]) => `${k}=${v}`).join(","))
+      if (patch) a.push("--command", "", "--args", "", "--env", "")
+    }
+    for (const ref of def.credentialRefs ?? []) a.push("--credential-ref", ref)
+    if (patch && !def.credentialRefs?.length) a.push("--credential-ref", "")
+    if (patch || def.disabledTools?.length) a.push("--tool-deny", (def.disabledTools ?? []).join(","))
+    return a
+  }
+
+  const addMcpServer = async (def) =>
+    run(
+      ["mcp", "add", "--slug", def.slug, "--name", def.name, "--transport", def.transport, ...mcpServerArgs(def)],
+      { timeoutMs: 60_000 },
+    )
+
+  const updateMcpServer = async (slug, def) =>
+    run(
+      ["mcp", "update", slug, "--name", def.name, "--transport", def.transport, ...mcpServerArgs(def, true)],
+      { timeoutMs: 60_000 },
+    )
+
+  const probeMcp = async (slug) => {
+    const r = await run(["mcp", "probe", slug, "--timeout-ms", "15000"], { timeoutMs: 30_000 })
+    if (r.ok) {
+      const tools = r.json?.tools
+      const n = Array.isArray(tools) ? tools.length : typeof r.json?.toolsCount === "number" ? r.json.toolsCount : null
+      log(`mcp ${slug} probe ok${n != null ? ` (${n} tools)` : ""}`)
+    } else {
+      log(`mcp ${slug} probe failed: ${errMsg(r)}`)
+      requestRetry("mcp-probe")
+    }
+    return r.ok
+  }
+
+  const selected = (items) => items.filter((item) =>
+    item && item.offHere !== true && item.disabled !== true && item.enabled !== false &&
+    Array.isArray(item.agents) && item.agents.includes("ducoro"))
+
+  const loadLibrary = async () => {
+    const lib = await readJson(paths.library)
+    if (!lib || (lib.mcp != null && !Array.isArray(lib.mcp)) || (lib.skills != null && !Array.isArray(lib.skills))) {
+      throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`)
+    }
+    return { ...lib, mcp: lib.mcp ?? [], skills: lib.skills ?? [] }
+  }
+
+  const desiredMcpServers = async (library) => {
+    const wanted = new Map()
+    if (opts.syncLibraryMcp) {
+      const exported = await readJson(paths.mcp)
+      const lib = parseLibMcp(exported)
+      for (const server of selected(library.mcp)) {
+        const name = str(server.name)
+        if (!name) continue
+        const slug = mcpSlug(name, String(opts.mcpPrefix))
+        // Keep the access decision separate from definition preparation. A
+        // broken export, missing variable or unsupported argument is retryable,
+        // not evidence that the user revoked this server.
+        wanted.set(slug, null)
+        if (!exported && state.mcp[slug]) {
+          log(`MCP server "${name}" kept while its export is unreadable; will retry`)
+          requestRetry("mcp-sync")
+          continue
+        }
+        // A routed export only contains "magpie". Ducoro needs an individual
+        // definition to show each selected server and its real tool catalog.
+        // Prefer an individual export (Magpie may have added an auth proxy),
+        // otherwise use that selected server's original library definition.
+        const direct = lib[name]
+        let def = direct ?? { ...server, type: server.transport }
+        if (direct?.url && /\/mcp\/magpie\/hub(?:\/|$)/.test(direct.url)) {
+          def = { ...server, type: server.transport }
+        }
+        if (def.disabled === true || def.enabled === false) {
+          wanted.delete(slug)
+          continue
+        }
+        try {
+          const expand = (value) => typeof value === "string" ? value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key) => {
+            if (process.env[key] === undefined) throw new Error(`missing environment variable ${key}`)
+            return process.env[key]
+          }) : value
+          def = {
+            ...def,
+            command: expand(def.command), url: expand(def.url),
+            args: Array.isArray(def.args) ? def.args.map(expand) : def.args,
+            env: Object.fromEntries(Object.entries(def.env ?? {}).map(([k, v]) => [k, expand(v)])),
+            headers: Object.fromEntries(Object.entries(def.headers ?? {}).map(([k, v]) => [k, expand(v)])),
+          }
+        } catch (e) {
+          log(`MCP server "${name}" skipped: ${e.message}`)
+          requestRetry("mcp-sync")
+          continue
+        }
+        const mapped = mapServer(name, def, String(opts.mcpPrefix))
+        if (!mapped) {
+          warnOnce(`mcp:${name}`, `cannot map MCP server "${name}" to a ducoro definition; skipped`)
+          requestRetry("mcp-sync")
+          continue
+        }
+        if (mapped.transport === "stdio" && (mapped.args ?? []).some((a) => a.includes(","))) {
+          warnOnce(
+            `mcp:${name}:args`,
+            `MCP server "${name}" skipped: one of its arguments contains a comma, ` +
+              `which ducoro-cli's single-use --args flag cannot represent`,
+          )
+          requestRetry("mcp-sync")
+          continue
+        }
+        mapped.disabledTools = Array.isArray(server.disabledTools) ? server.disabledTools.map(String) : []
+        wanted.set(mapped.slug, mapped)
+      }
+    }
+    return wanted
+  }
+
+  const pendingMcpProbes = new Set()
+  let authorizedMcpSlugs = new Set()
+  let probeDrain = null
+  const drainMcpProbes = () => {
+    if (probeDrain) return probeDrain
+    probeDrain = (async () => {
+      while (pendingMcpProbes.size) {
+        const slug = pendingMcpProbes.values().next().value
+        pendingMcpProbes.delete(slug)
+        if (authorizedMcpSlugs.has(slug)) await probeMcp(slug)
+      }
+    })().finally(() => { probeDrain = null })
+    return probeDrain
+  }
+
+  const syncMcp = async (library) => {
+    const wanted = await desiredMcpServers(library)
+    authorizedMcpSlugs = new Set(wanted.keys())
+    const current = await listMcpSlugs()
+    if (!current) return
+
+    // Apply revocations before any add/update or potentially slow discovery.
+    // Legacy prune=false must not keep a resource the user turned off.
+    for (const slug of Object.keys(state.mcp)) {
+      if (wanted.has(slug)) continue
+      pendingMcpProbes.delete(slug)
+      const r = await run(["mcp", "rm", slug], { timeoutMs: 30_000 })
+      if (r.ok || isNotFound(r)) {
+        delete state.mcp[slug]
+        await saveState()
+        log(`removed MCP server ${slug} (no longer in the magpie library)`)
+      } else {
+        log(`removing MCP server ${slug} failed: ${errMsg(r)}`)
+        requestRetry("mcp-sync")
+      }
+    }
+
+    for (const [slug, def] of wanted) {
+      if (watching && pending) return
+      if (!def) continue
+      if (current.has(slug) && !state.mcp[slug]) {
+        warnOnce(
+          `mcp:${slug}`,
+          `MCP slug "${slug}" already exists and was not created by this plugin; skipped`,
+        )
+        continue
+      }
+      // Hash the actual source values before replacing secrets with references.
+      // The persisted digest avoids rewriting identical credentials every tick,
+      // while a changed secret still causes a credential refresh.
+      const hash = defHash(def)
+      const changed = !current.has(slug) || state.mcp[slug] !== hash
+      if (changed && !(await materializeSecrets(def))) {
+        log(`mcp ${slug} skipped: a comma-bearing value could not be stored in the credential store`)
+        requestRetry("mcp-sync")
+        continue
+      }
+      if (!current.has(slug)) {
+        const r = await addMcpServer(def)
+        if (r.ok) {
+          state.mcp[slug] = hash
+          await saveState()
+          pendingMcpProbes.add(slug)
+        } else {
+          log(`adding MCP server ${slug} failed (kept for retry): ${errMsg(r)}`)
+          requestRetry("mcp-sync")
+        }
+      } else if (state.mcp[slug] !== hash) {
+        const r = await updateMcpServer(slug, def)
+        if (r.ok) {
+          state.mcp[slug] = hash
+          await saveState()
+          pendingMcpProbes.add(slug)
+        } else {
+          log(`updating MCP server ${slug} failed (kept for retry): ${errMsg(r)}`)
+          requestRetry("mcp-sync")
+        }
+      } else if (current.get(slug)?.connectionStatus !== "connected") {
+        pendingMcpProbes.add(slug)
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ skills
+
+  // Keep only paths and the small manifest in memory. A scan hashes one file
+  // at a time; staging is needed only for a changed bundle. Watches invalidate
+  // the cache, while explicit/periodic reconciliations still hash all bytes.
+  const activeSkillRoots = new Set()
+  const skillBundleCache = new Map()
+  let skillCacheGeneration = 0
+  const invalidateSkillCache = () => { skillCacheGeneration++; skillBundleCache.clear() }
+
+  const readBundle = async (source) => {
+    const root = await realpath(source)
+    const files = []
+    const walk = async (dir, rel = "", parents = new Set()) => {
+      const resolved = await realpath(dir)
+      if (resolved !== root && !resolved.startsWith(root + "/")) throw new Error("skill link escapes its bundle")
+      if (parents.has(resolved)) throw new Error("cyclic skill link")
+      const ancestors = new Set([...parents, resolved])
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        if (e.name === ".DS_Store" || e.name === ".git") continue
+        const path = join(dir, e.name)
+        const target = await realpath(path)
+        if (target !== root && !target.startsWith(root + "/")) throw new Error("skill link escapes its bundle")
+        const info = await stat(path)
+        const name = rel ? `${rel}/${e.name}` : e.name
+        if (info.isDirectory()) await walk(path, name, ancestors)
+        else if (info.isFile()) files.push({ name, path, mode: info.mode & 0o777 })
+        else throw new Error(`unsupported skill entry: ${name}`)
+      }
+    }
+    await walk(root)
+    files.sort((a, b) => a.name.localeCompare(b.name))
+    const manifest = files.find((f) => f.name === "SKILL.md")
+    if (!manifest) throw new Error("SKILL.md missing")
+    const md = compatibleSkillMarkdown(await readFile(manifest.path, "utf8"), new Set(files.map((f) => f.name)))
+    const hash = createHash("sha256")
+    for (const f of files) {
+      const bytes = f.name === "SKILL.md" ? Buffer.from(md) : await readFile(f.path)
+      hash.update(JSON.stringify([f.name, bytes.length, f.mode])).update(bytes)
+    }
+    return { files, md, hash: hash.digest("hex") }
+  }
+
+  const skillCommand = (scope, action, ...args) => scope === "global"
+    ? ["skill", action, ...args]
+    : ["agent", "skill", action, scope, ...args]
+
+  const skillNames = async (scope) => {
+    const r = await run(skillCommand(scope, "list"), { timeoutMs: 30_000 })
+    if (!r.ok) {
+      log(`skill list (${scope}) failed: ${errMsg(r)}`)
+      requestRetry("skill-list")
+      return null
+    }
+    if (dryRun && !r.json) return new Set()
+    const raw = r.json
+    const arr = Array.isArray(raw) ? raw : raw?.skills ?? raw?.data
+    if (!Array.isArray(arr)) { requestRetry("skill-list"); return null }
+    return new Set(arr.map((s) => typeof s === "string" ? s : str(s?.name) || str(s?.slug)).filter(Boolean))
+  }
+
+  const listSkillBundles = async (library) => {
+    const found = new Map()
+    const candidates = []
+    activeSkillRoots.clear()
+    for (const item of selected(library.skills)) {
+      const sourceName = str(item.name)
+      if (!sourceName || basename(sourceName) !== sourceName || sourceName === "." || sourceName === "..") continue
+      let dir = null
+      for (const path of [join(paths.skills, sourceName), join(paths.librarySkills, sourceName)]) {
+        if ((await stat(path).catch(() => null))?.isDirectory()) { dir = path; break }
+      }
+      if (!dir) {
+        log(`selected skill ${sourceName} has no readable bundle; will retry`)
+        requestRetry("skill-source")
+        found.set(sourceName, { sourceName })
+        continue
+      }
+      try {
+        const root = await realpath(dir)
+        activeSkillRoots.add(root)
+        candidates.push({ sourceName, dir, root })
+      } catch (e) {
+        log(`selected skill ${sourceName} cannot be resolved: ${e.message}`)
+        requestRetry("skill-source")
+        found.set(sourceName, { sourceName })
+      }
+    }
+    // Discover all roots before refreshing so one source cannot retire the
+    // next source's watcher while this round is still scanning its bytes.
+    if (watching) await refreshWatches()
+    for (const { sourceName, dir, root } of candidates) {
+      try {
+        const generation = skillCacheGeneration
+        const bundle = (watching && skillBundleCache.get(root)) || await readBundle(dir)
+        if (watching && generation === skillCacheGeneration) skillBundleCache.set(root, bundle)
+        const name = skillName(bundle.md, sourceName)
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("invalid skill manifest name")
+        if (found.has(name)) throw new Error(`duplicate skill manifest name ${name}`)
+        found.set(name, { sourceName, dir, ...bundle })
+      } catch (e) {
+        log(`selected skill ${sourceName} cannot be prepared: ${e.message}`)
+        requestRetry("skill-source")
+        found.set(sourceName, { sourceName })
+      }
+    }
+    for (const root of skillBundleCache.keys()) if (!activeSkillRoots.has(root)) skillBundleCache.delete(root)
+    return found
+  }
+
+  const removeNamedSkill = async (scope, name) => {
+    const r = await run(skillCommand(scope, "remove", name), { timeoutMs: 30_000 })
+    if (r.ok || isNotFound(r)) return true
+    log(`removing skill ${name} failed: ${errMsg(r)}`)
+    requestRetry("skill-cleanup")
+    return false
+  }
+
+  const removeSkill = async (id, mine) => {
+    // A cancelled assignment also owns its interrupted replacement backup.
+    // Retain the transaction until both names have been removed successfully.
+    if (!(await removeNamedSkill(mine.scope, mine.name))) return false
+    if (mine.replacement && !(await removeNamedSkill(mine.scope, mine.replacement.backupName))) return false
+    delete state.skills[id]
+    await saveState()
+    log(`removed skill ${mine.name} (${mine.scope})`)
+    return true
+  }
+
+  const pruneSkills = async (library) => {
+    const scope = str(opts.skillsScope) || "global"
+    const sourceNames = new Set(opts.syncSkills ? selected(library.skills).map((item) => str(item.name)) : [])
+    for (const [id, mine] of Object.entries(state.skills)) {
+      if (!mine.scope) {
+        delete state.skills[id]
+        state.skills[`global:${id}`] = { ...mine, scope: "global", name: id, sourceName: id }
+      }
+    }
+    for (const [id, mine] of Object.entries(state.skills)) {
+      if (mine.scope !== scope || !sourceNames.has(mine.sourceName)) await removeSkill(id, mine)
+    }
+    if (!sourceNames.size) { activeSkillRoots.clear(); invalidateSkillCache() }
+  }
+
+  // import refuses an existing valid target. Rename the complete old bundle
+  // instead of deleting it, and journal the backup in the existing owner entry
+  // before touching Ducoro. The journal survives app/CLI host restarts.
+  const recoverSkillReplacement = async (id, mine, existing) => {
+    const tx = mine.replacement
+    if (!tx) return true
+    const hasOriginal = existing.has(mine.name)
+    const hasBackup = existing.has(tx.backupName)
+    if (hasOriginal && tx.phase === "installed") {
+      if (hasBackup && !(await removeNamedSkill(mine.scope, tx.backupName))) return false
+      existing.delete(tx.backupName)
+      delete mine.replacement
+      await saveState()
+      return true
+    }
+    if (hasBackup) {
+      if (hasOriginal) {
+        // An import completed just before the process exited. Both identities
+        // are recorded by this transaction; commit the valid listed candidate.
+        mine.hash = tx.nextHash
+        tx.phase = "installed"
+        await saveState()
+        return recoverSkillReplacement(id, mine, existing)
+      }
+      const restored = await run(skillCommand(mine.scope, "rename", tx.backupName, "--to", mine.name), { timeoutMs: 30_000 })
+      if (!restored.ok) {
+        log(`restoring previous skill ${mine.name} failed; backup retained: ${errMsg(restored)}`)
+        requestRetry("skill-restore")
+        return false
+      }
+      existing.delete(tx.backupName)
+      existing.add(mine.name)
+      mine.hash = tx.previousHash
+    } else if (!hasOriginal) {
+      log(`skill ${mine.name} replacement is incomplete; ownership retained for retry`)
+      requestRetry("skill-restore")
+      return false
+    }
+    delete mine.replacement
+    await saveState()
+    return true
+  }
+
+  const syncSkills = async (library) => {
+    await pruneSkills(library)
+    const scope = str(opts.skillsScope) || "global"
+    const bundles = opts.syncSkills ? await listSkillBundles(library) : new Map()
+    if (!bundles.size) return
+    const existing = await skillNames(scope)
+    if (!existing) return
+    for (const [id, mine] of Object.entries(state.skills)) {
+      if (mine.scope === scope && mine.replacement) await recoverSkillReplacement(id, mine, existing)
+    }
+    for (const [name, bundle] of bundles) {
+      if (watching && pending) return
+      if (!bundle.dir) continue
+      const { dir, hash, files, sourceName, md } = bundle
+      const id = `${scope}:${name}`
+      let mine = state.skills[id]
+      if (mine?.replacement) continue
+      if (existing.has(name) && !mine) {
+        warnOnce(`skill:${id}`, `skill "${name}" exists in Ducoro (${scope}) and was not imported by this plugin; skipped`)
+        continue
+      }
+      if (mine?.hash === hash && existing.has(name)) continue
+      const temp = await mkdtemp(join(tmpdir(), "magpie-ducoro-skill-"))
+      try {
+        const staged = join(temp, name)
+        await mkdir(staged)
+        for (const f of files) {
+          const path = join(staged, f.name)
+          await mkdir(dirname(path), { recursive: true })
+          if (f.name === "SKILL.md") await writeFile(path, md)
+          else await copyFile(f.path, path)
+          await chmod(path, f.mode)
+        }
+        if ((await readBundle(staged)).hash !== hash) {
+          invalidateSkillCache()
+          throw new Error(`skill ${name} changed during staging; will retry`)
+        }
+        if (mine && existing.has(name)) {
+          let suffix = 0
+          let backupName
+          do { backupName = `magpie-backup-${sha256(id + hash).slice(0, 16)}${suffix ? `-${suffix}` : ""}`; suffix++ } while (existing.has(backupName))
+          mine.replacement = { backupName, previousHash: mine.hash, nextHash: hash, phase: "prepared" }
+          await saveState()
+          const backup = await run(skillCommand(scope, "rename", name, "--to", backupName), { timeoutMs: 30_000 })
+          if (!backup.ok) {
+            log(`backing up skill ${name} failed; update deferred: ${errMsg(backup)}`)
+            requestRetry("skill-backup")
+            continue
+          }
+          existing.delete(name)
+          existing.add(backupName)
+          mine.replacement.phase = "backed-up"
+          await saveState()
+        }
+        const r = await run(skillCommand(scope, "import", staged), { timeoutMs: 60_000 })
+        if (r.ok) {
+          existing.add(name)
+          state.skills[id] = { scope, name, sourceName, hash, dir, ...(mine?.replacement ? { replacement: { ...mine.replacement, phase: "installed" } } : {}) }
+          mine = state.skills[id]
+          await saveState()
+          if (mine.replacement) await recoverSkillReplacement(id, mine, existing)
+          // A manifest rename should retire its old identity only after the
+          // replacement has successfully reached Ducoro.
+          for (const [oldId, old] of Object.entries(state.skills)) {
+            if (oldId !== id && old.scope === scope && old.sourceName === sourceName) await removeSkill(oldId, old)
+          }
+          log(`skill ${name} imported (${scope})`)
+        } else {
+          log(`importing skill ${name} failed; restoring previous version: ${errMsg(r)}`)
+          requestRetry("skill-import")
+          if (mine?.replacement) await recoverSkillReplacement(id, mine, existing)
+        }
+      } catch (e) {
+        invalidateSkillCache()
+        log(`preparing skill ${name} failed; existing import retained: ${e.message}`)
+        requestRetry("skill-stage")
+      } finally {
+        await rm(temp, { recursive: true, force: true })
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- flow
+
+  let disconnectNoted = false
+  let gatewayMissingSince = null
+
+  const syncGateway = async (reason = "tick") => {
+    const controller = new AbortController()
+    activeGatewayController = controller
+    try {
+      const result = await readJsonDetailed(paths.bridge)
+      let f = result.value
+      if (!result.ok) {
+        if (result.missing && state.connection) {
+          gatewayMissingSince ??= Date.now()
+          if (Date.now() - gatewayMissingSince >= 250) f = {}
+        } else if (result.missing) f = {}
+        if (!f) {
+          log("gateway configuration temporarily unreadable; keeping the connection")
+          requestRetry("gateway-unreadable")
+          return
+        }
+      } else gatewayMissingSince = null
+      const plain = (value) => value && typeof value === "object" && !Array.isArray(value)
+      const gateway = f?.gateway === undefined ? {} : f.gateway
+      // A valid empty object is Magpie's restored/disconnected configuration.
+      // Malformed or half-written gateway values are not a disconnect signal.
+      const valid = plain(f) && plain(gateway) && ["url", "v1", "key"].every((key) =>
+        gateway[key] === undefined || typeof gateway[key] === "string")
+      const gwUrl = str(gateway?.url)
+      const key = str(gateway?.key)
+      if (!valid || Boolean(gwUrl) !== Boolean(key)) {
+        log("gateway configuration incomplete; keeping the connection")
+        requestRetry("gateway-unreadable")
+        return
+      }
+      rememberSecret(key)
+      if (result.ok && !dryRun) {
+        const info = await stat(paths.bridge).catch(() => null)
+        if (info && (info.mode & 0o777) !== 0o600) await chmod(paths.bridge, 0o600).catch(() => {})
+      }
+  
+      const gwV1 = str(gateway.v1) || (gwUrl ? gwUrl.replace(/\/+$/, "") + "/v1" : "")
+      const model = normalizeModel(f?.model)
+      const models = modelIds(f?.models)
+      const connected = Boolean(gwUrl && key)
+  
+      if (!connected) {
+        await handleDisconnected()
+      } else disconnectNoted = false
+  
+      log(`sync (${reason}): gateway ${gwUrl}, model ${model ?? "—"}, ${models.length} model(s)`)
+  
+      if (connected && opts.syncConnection) await syncConnection({ gwUrl, gwV1, key, model, models })
+    } catch (e) {
+      if (e?.code !== "GATEWAY_SUPERSEDED") {
+        log("connection sync error:", e?.message ?? e)
+        requestRetry("gateway-sync")
+      }
+    } finally {
+      if (activeGatewayController === controller) activeGatewayController = null
+    }
+  }
+
+  const syncTotal = createTotalSync({ opts: { ...opts, dryRun }, paths, run, save: saveState, getState: () => state, requestRetry: (...args) => requestRetry(...args), log })
+
+  const syncAllUnlocked = async (reason = "tick") => {
+    await loadState()
+    // Resource-library assignment is independent of the model connection.
+    // Never keep a deselected resource because onDisconnect=keep/prune=false.
+    let library
+    try {
+      library = await loadLibrary()
+    } catch (e) {
+      log(e.message)
+      requestRetry("library-unreadable")
+    }
+    if (library) {
+      // Revocations run before additions, large bundle reads, or gateway work.
+      try { await pruneSkills(library) } catch (e) {
+        log("skill cleanup error:", e?.message ?? e)
+        requestRetry("skill-cleanup")
+      }
+      try {
+        await syncMcp(opts.syncMcp ? library : { ...library, mcp: [] })
+      } catch (e) {
+        log("mcp sync error:", e?.message ?? e)
+        requestRetry("mcp-sync")
+      }
+      try { await syncTotal(library) } catch (e) {
+        log("Total sync error:", e?.message ?? e)
+        requestRetry("total-sync")
+      }
+      try {
+        await syncSkills(library)
+      } catch (e) {
+        log("skill sync error:", e?.message ?? e)
+        requestRetry("skill-sync")
+      }
+    }
+    if (!stopped && (!watching || !pending)) await syncGateway(reason)
+  }
+
+  // Magpie CLI commands start their own plugin hosts while the app's host
+  // stays alive. Serialize their writes and reload ownership each round so
+  // an older host cannot overwrite another host's newly imported skills.
+  let syncing = false
+  const syncAll = async (reason = "tick") => {
+    if (syncing || stopped) return false
+    syncing = true
+    if (!watching || reason === "interval" || reason === "startup") invalidateSkillCache()
+    const lock = join(stateDir, "sync.lock")
+    let locked = false
+    try {
+      if (!dryRun) {
+        await mkdir(stateDir, { recursive: true })
+        try {
+          await mkdir(lock)
+        } catch (e) {
+          if (e.code !== "EEXIST") throw e
+          const owner = await readJson(join(lock, "owner.json"))
+          let stale = false
+          if (Number.isInteger(owner?.pid) && owner.pid > 0) {
+            try { process.kill(owner.pid, 0) } catch (err) { stale = err.code === "ESRCH" }
+          } else {
+            const info = await stat(lock).catch(() => null)
+            stale = info && Date.now() - info.mtimeMs > 60_000
+          }
+          if (!stale) return false
+          await rm(lock, { recursive: true, force: true })
+          await mkdir(lock)
+        }
+        locked = true
+        await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }))
+      }
+      stateLoaded = false
+      state = { v: 2, connection: null, mcp: {}, skills: {} }
+      await syncAllUnlocked(reason)
+      return true
+    } finally {
+      if (locked) await rm(lock, { recursive: true, force: true })
+      syncing = false
+      // Probing remote servers must not hold the mutation lock or delay a
+      // subsequent Library event. Manual syncs still wait for their diagnostics.
+      if (watching) {
+        if (!pending) void drainMcpProbes().catch((e) => { log("mcp probe error:", e?.message ?? e); requestRetry("mcp-probe") })
+        void refreshWatches()
+      } else await drainMcpProbes()
+    }
+  }
+
+  const handleDisconnected = async () => {
+    if (!state.connection) return
+    if (opts.onDisconnect === "remove") {
+      log("model disconnected; removing the bridge connection")
+      await removeConnection()
+    } else if (!disconnectNoted) {
+      disconnectNoted = true
+      log("model disconnected; connection kept (onDisconnect=keep)")
+    }
+  }
+
+  // ------------------------------------------------------------ start
+
+  let watching = false
+  let stopped = false
+  let lifecycleGeneration = 0
+  let running = false
+  let pending = false
+  let syncTimer = null
+  let retryTimer = null
+  let interval = null
+  let watchFallback = null
+  let watchDegraded = false
+  let activeRun = null
+  let retryDelay = 250
+  let retryRequested = false
+  let refreshPromise = null
+  let refreshAgain = false
+  const watchers = new Map()
+
+  const requestRetry = (reason) => {
+    if (!watching) return
+    retryRequested = true
+    if (retryTimer) return
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      trigger(`retry:${reason}`, 0)
+    }, retryDelay)
+    retryDelay = Math.min(5_000, retryDelay * 2)
+  }
+
+  // A bounded batch window, not a trailing debounce: continuous filesystem
+  // writes cannot postpone a user's selection indefinitely.
+  const trigger = (reason = "file-change", delay = 75) => {
+    if (!watching) return
+    if (reason === "file-change" || reason === "watch-fallback") interruptGatewayReads()
+    if (running) { pending = true; return }
+    if (syncTimer) return
+    syncTimer = setTimeout(() => {
+      syncTimer = null
+      running = true
+      retryRequested = false
+      activeRun = (async () => {
+        try {
+          if (await syncAll(reason) === false) requestRetry("host-lock")
+          if (!retryRequested) {
+            retryDelay = 250
+            clearTimeout(retryTimer)
+            retryTimer = null
+          }
+        } catch (e) {
+          log("sync failed:", e?.message ?? e)
+          requestRetry("sync-failed")
+        } finally {
+          running = false
+          if (pending && watching) {
+            pending = false
+            trigger("coalesced", 0)
+          }
+        }
+      })()
+    }, delay)
+  }
+
+  const refreshWatches = () => {
+    if (!watching) return Promise.resolve()
+    if (refreshPromise) { refreshAgain = true; return refreshPromise }
+    refreshPromise = (async () => {
+      do {
+        refreshAgain = false
+        const desired = new Map()
+        const add = (dir, recursive = false, name = null, info = null) => {
+          const entry = desired.get(dir) ?? { recursive: false, names: new Set(), info }
+          entry.recursive ||= recursive
+          if (name) entry.names.add(name)
+          if (info) entry.info = info
+          desired.set(dir, entry)
+        }
+        // Anchor a missing directory at its nearest existing ancestor. When
+        // Magpie creates it, attach the real watcher during the same event.
+        const observe = async (target, recursive, name = null) => {
+          let dir = target, child = name
+          let info = await stat(dir).catch(() => null)
+          while (!info?.isDirectory() && dirname(dir) !== dir) {
+            child = basename(dir)
+            dir = dirname(dir)
+            info = await stat(dir).catch(() => null)
+          }
+          if (info?.isDirectory()) add(await realpath(dir), dir === target && recursive, child, info)
+        }
+        for (const file of [paths.bridge, paths.mcp, paths.library, paths.instructions]) {
+          await observe(dirname(file), false, basename(file))
+          await observe(dirname(dirname(file)), false, basename(dirname(file)))
+        }
+        const roots = new Set([paths.skills, paths.librarySkills, ...activeSkillRoots])
+        for (const dir of roots) {
+          await observe(dir, true)
+          await observe(dirname(dir), false, basename(dir))
+        }
+        // A recursive root already covers its physical subdirectories.
+        for (const dir of [...desired.keys()]) {
+          if ([...desired].some(([parent, entry]) => parent !== dir && entry.recursive && dir.startsWith(parent + "/"))) desired.delete(dir)
+        }
+        if (!watching) break
+        watchDegraded = false
+        for (const [dir, entry] of watchers) {
+          const want = desired.get(dir)
+          if (!want || want.recursive !== entry.recursive || want.info?.ino !== entry.ino || want.info?.dev !== entry.dev) {
+            entry.watcher.close()
+            watchers.delete(dir)
+          } else entry.names = want.names
+        }
+        for (const [dir, want] of desired) {
+          if (watchers.has(dir)) continue
+          try {
+            const entry = { ...want, ino: want.info?.ino, dev: want.info?.dev }
+            const watcher = fsWatch(dir, { recursive: want.recursive }, (_event, filename) => {
+              const name = filename == null ? null : String(filename).split(/[\\/]/)[0]
+              if (!entry.recursive && name && !entry.names.has(name)) return
+              invalidateSkillCache()
+              trigger("file-change")
+              void refreshWatches()
+            })
+            entry.watcher = watcher
+            watcher.on("error", (error) => {
+              watchDegraded = true
+              warnOnce(`watch:${dir}:${error?.code}`, `watch error (${error?.code ?? "unknown"}): ${dir}; using short reconciliation fallback`)
+              watcher.close()
+              if (watchers.get(dir) === entry) watchers.delete(dir)
+              requestRetry("watch-error")
+            })
+            watchers.set(dir, entry)
+          } catch { watchDegraded = true; requestRetry("watch-missing") }
+        }
+      } while (refreshAgain && watching)
+    })().catch((e) => {
+      log("watch refresh failed:", e?.message ?? e)
+      requestRetry("watch-refresh")
+    }).finally(() => { refreshPromise = null })
+    return refreshPromise
+  }
+
+  const start = async () => {
+    if (watching) return
+    const generation = ++lifecycleGeneration
+    stopped = false
+    watching = true
+    await refreshWatches()
+    if (!watching || generation !== lifecycleGeneration) return
+    trigger("startup", 0)
+    // Watch failures (OS limits, unsupported recursive watch) must not silently
+    // turn resource changes into a two-minute wait. This path is normally idle.
+    watchFallback = setInterval(() => {
+      if (!watchDegraded) return
+      invalidateSkillCache()
+      void refreshWatches()
+      trigger("watch-fallback", 0)
+    }, 500)
+    watchFallback.unref?.()
+    interval = setInterval(() => {
+      void refreshWatches()
+      trigger("interval", 0)
+    }, Math.max(30_000, Number(opts.intervalMs) || DEFAULTS.intervalMs))
+    interval.unref?.()
+    log(`bridge started (state: ${stateFile}, dry-run: ${dryRun})`)
+  }
+
+  const stop = async () => {
+    lifecycleGeneration++
+    stopped = true
+    watching = false
+    interruptGatewayReads()
+    authorizedMcpSlugs.clear()
+    pendingMcpProbes.clear()
+    pending = false
+    clearTimeout(syncTimer)
+    clearTimeout(retryTimer)
+    clearInterval(interval)
+    clearInterval(watchFallback)
+    syncTimer = retryTimer = interval = null
+    for (const { watcher } of watchers.values()) watcher.close()
+    watchers.clear()
+    await refreshPromise
+    await activeRun
+    await drainMcpProbes()
+  }
+
+  return {
+    opts, paths, stateFile, start, stop, syncAll, trigger, drainMcpProbes,
+    get state() { return state },
+    get watchedPaths() { return [...watchers.keys()] },
+  }
+
+}
+
+// ---------------------------------------------------------------- plugin
+
+const DucoroBridge = async (input, options) => {
+  const engine = createEngine(input, options)
+  await engine.start()
+  return {}
+}
+
+export default { id: "magpie-ducoro", server: DucoroBridge }
+
+export const _internal = {
+  createEngine,
+  DEFAULTS,
+  DEFAULT_PATHS,
+  sha256,
+  slugify,
+  str,
+  normalizeModel,
+  modelIds,
+  parseLibMcp,
+  mapServer,
+  defHash,
+  skillName,
+  compatibleSkillMarkdown,
+  sameSet,
+  sameObj,
+}
+
+// ------------------------------------------------------------ self-test
+
+// bun bridge.mjs --selftest   (paths via DUCORO_BRIDGE_FILE / _MCP_FILE /
+// _SKILLS_DIR / _STATE_DIR; runs one syncAll in dry-run unless
+// DUCORO_BRIDGE_LIVE=1)
+if (
+  import.meta.main ||
+  (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+) {
+  const live = process.env.DUCORO_BRIDGE_LIVE === "1"
+  const engine = createEngine(
+    {},
+    {
+      dryRun: !live,
+      ...(process.env.DUCORO_BRIDGE_OPTS ? JSON.parse(process.env.DUCORO_BRIDGE_OPTS) : {}),
+    },
+  )
+  let synced = false
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (await engine.syncAll("selftest")) { synced = true; break }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  if (!synced) {
+    console.error("[ducoro-bridge] another host is syncing; selftest not run")
+    process.exit(1)
+  }
+  console.log("[ducoro-bridge] selftest done")
+  process.exit(0)
+}
