@@ -44,6 +44,8 @@ import { basename, dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
 import { createTotalSync } from "./total.mjs"
+import { createModelSync } from "./model-sync.mjs"
+import { OFFICIAL_PROVIDERS, resolveCapabilityMappings } from "./model-capabilities.mjs"
 
 const HOME = homedir()
 
@@ -63,6 +65,9 @@ export const DEFAULTS = {
   connectionSlug: "magpie-ducoro",
   connectionName: "Magpie gateway",
   syncConnection: true,
+  syncAgentModels: true,
+  officialProviders: OFFICIAL_PROVIDERS,
+  modelCapabilityRefs: {},
   syncMcp: true,
   syncSkills: true,
   syncInstructions: true,
@@ -239,6 +244,8 @@ const createEngine = (input = {}, options = {}) => {
     skills: pathFromEnv("DUCORO_BRIDGE_SKILLS_DIR", DEFAULT_PATHS.skills),
     library: pathFromEnv("DUCORO_BRIDGE_LIBRARY_FILE", join(configDir, "library.json")),
     librarySkills: pathFromEnv("DUCORO_BRIDGE_LIBRARY_SKILLS_DIR", join(configDir, "library", "skills")),
+    providers: pathFromEnv("DUCORO_BRIDGE_PROVIDERS_FILE", join(configDir, "providers.json")),
+    pluginProviders: pathFromEnv("DUCORO_BRIDGE_PLUGIN_PROVIDERS_FILE", join(configDir, "plugin-providers.json")),
   }
   const stateDir = pathFromEnv(
     "DUCORO_BRIDGE_STATE_DIR",
@@ -248,6 +255,7 @@ const createEngine = (input = {}, options = {}) => {
   paths.instructions = pathFromEnv("DUCORO_BRIDGE_INSTRUCTIONS_FILE", join(HOME, ".ducoro", "magpie-instructions.md"))
   paths.ducoroHome = pathFromEnv("DUCORO_BRIDGE_DUCORO_HOME", join(HOME, ".ducoro"))
   paths.report = join(stateDir, "total-status.json")
+  paths.capabilityReport = join(stateDir, "model-capabilities.json")
 
   const knownSecrets = new Set()
   const rememberSecret = (value) => {
@@ -288,6 +296,8 @@ const createEngine = (input = {}, options = {}) => {
         state = {
           v: 2,
           connection: raw.connection ?? null,
+          modelMigration: raw.modelMigration ?? null,
+          modelCapabilities: raw.modelCapabilities ?? null,
           mcp: raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {},
           total: raw.total,
           skills: raw.skills && typeof raw.skills === "object" ? raw.skills : {},
@@ -319,7 +329,7 @@ const createEngine = (input = {}, options = {}) => {
     new Promise((resolve, reject) => {
       const gatewaySignal = args[0] === "connections" ? activeGatewayController?.signal : null
       if (gatewaySignal?.aborted) { reject(gatewayAbortError()); return }
-      const abortableRead = gatewaySignal && ["catalog", "get"].includes(args[1])
+      const abortableRead = gatewaySignal && ["catalog", "get", "list"].includes(args[1])
       const full = [...args, "--json"]
       rememberSecret(stdin)
       for (let i = 0; i < args.length - 1; i++) {
@@ -443,23 +453,68 @@ const createEngine = (input = {}, options = {}) => {
     return catalogCache
   }
 
-  const refsFor = async (ids) => {
-    if (!ids.length) return {}
-    const cat = await loadCatalog()
-    if (!cat) return {}
-    const refs = {}
-    for (const id of ids) {
-      const i = id.indexOf("/")
-      if (i <= 0) continue
-      const prov = id.slice(0, i).toLowerCase()
-      const rest = id.slice(i + 1).toLowerCase()
-      const hit =
-        cat.find((c) => String(c?.provider ?? "").toLowerCase() === prov && String(c?.id ?? "").toLowerCase() === rest) ??
-        cat.find((c) => String(c?.id ?? "").toLowerCase() === rest)
-      if (hit?.provider && hit?.id) refs[id] = `${hit.provider}/${hit.id}`
+  const refsFor = async (ids, existing, descriptors) => {
+    const [cat, providers, pluginProviders] = await Promise.all([
+      ids.length ? loadCatalog() : null,
+      readJsonDetailed(paths.providers), readJsonDetailed(paths.pluginProviders),
+    ])
+    for (const result of [providers, pluginProviders]) {
+      if (!result.ok && !result.missing) requestRetry("model-metadata")
     }
-    return refs
+    return resolveCapabilityMappings({
+      ids, catalog: cat, existing, exported: descriptors,
+      providers: providers.ok ? providers.value : null,
+      pluginProviders: pluginProviders.ok ? pluginProviders.value : [],
+      metadataUnavailable: [providers, pluginProviders].some(result => !result.ok && !result.missing),
+      previous: state.modelCapabilities?.slug === String(opts.connectionSlug) ? state.modelCapabilities : null,
+      overrides: opts.modelCapabilityRefs, officialProviders: opts.officialProviders,
+    })
   }
+
+  const reportCapabilities = async (plan, applied) => {
+    for (const entry of plan.entries) {
+      if (entry.status !== "matched" || entry.warnings.length) warnOnce(
+        `capability:${JSON.stringify(entry)}`,
+        `model ${entry.id}: ${entry.status}; ${entry.reference ? `reference ${entry.reference} (${entry.source})` : "no automatic reference; set modelCapabilityRefs if needed"}` +
+          (entry.warnings.length ? `; ${entry.warnings.join(", ")}` : "") + `; details: ${paths.capabilityReport}`,
+      )
+    }
+    if (dryRun) return
+    const report = { version: 1, connectionSlug: String(opts.connectionSlug), applied, entries: plan.entries }
+    const old = await readJson(paths.capabilityReport)
+    if (old) delete old.updatedAt
+    if (JSON.stringify(old) === JSON.stringify(report)) return
+    const temp = `${paths.capabilityReport}.${process.pid}.tmp`
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(temp, JSON.stringify({ ...report, updatedAt: new Date().toISOString() }, null, 2) + "\n", { mode: 0o600 })
+    await rename(temp, paths.capabilityReport)
+  }
+
+  const stageCapabilities = async (plan) => {
+    if (!dryRun) {
+      state.modelCapabilities = {
+        ...(state.modelCapabilities?.slug === String(opts.connectionSlug) ? state.modelCapabilities : {}),
+        slug: String(opts.connectionSlug), pending: { refs: plan.refs, provenance: plan.provenance },
+      }
+      await saveState()
+    }
+    await reportCapabilities(plan, false)
+  }
+
+  const commitCapabilities = async (plan) => {
+    const next = { slug: String(opts.connectionSlug), ...plan.provenance }
+    if (!dryRun && JSON.stringify(state.modelCapabilities) !== JSON.stringify(next)) {
+      state.modelCapabilities = next
+      await saveState()
+    }
+    await reportCapabilities(plan, true)
+  }
+
+  const modelSync = createModelSync({
+    opts: { ...opts, dryRun }, run, getState: () => state, save: saveState,
+    requestRetry: (...args) => requestRetry(...args), log,
+    isCurrent: () => !stopped && !activeGatewayController?.signal.aborted,
+  })
 
   // -------------------------------------------------------- connection
 
@@ -479,7 +534,7 @@ const createEngine = (input = {}, options = {}) => {
     if (want.model) a.push("--model", want.model)
     if (want.models.length) a.push("--models", want.models.join(","))
     const refs = Object.entries(want.refs)
-    if (refs.length) a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
+    a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
     return a
   }
 
@@ -524,22 +579,36 @@ const createEngine = (input = {}, options = {}) => {
     return true
   }
 
-  const syncConnection = async ({ gwUrl, gwV1, key, model, models }) => {
+  const syncConnection = async ({ gwUrl, gwV1, key, model, models, descriptors }) => {
     const slug = String(opts.connectionSlug)
+    if (model && models.length && !models.includes(model)) {
+      log("selected model is absent from Magpie's export; keeping the connection and Bots for retry")
+      requestRetry("gateway-model-catalog")
+      return
+    }
+    const cur = await getConnection(slug)
+    const capabilityPlan = await refsFor(models, cur?.modelCapabilityRefs, descriptors)
     const want = {
       name: String(opts.connectionName),
       baseUrl: gwV1,
       model,
       models,
-      refs: await refsFor(models),
+      refs: capabilityPlan.refs,
     }
-    const cur = await getConnection(slug)
     const keyHash = sha256(key)
 
     if (!cur) {
+      await stageCapabilities(capabilityPlan)
       if (await createConnection(slug, want, key)) {
         state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
         await saveState()
+        if (dryRun) return
+        const saved = await getConnection(slug)
+        if (saved && str(saved.baseUrl) === want.baseUrl && str(saved.defaultModel) === want.model && sameSet(saved.models, want.models)
+          && sameObj(saved.modelCapabilityRefs, want.refs)) {
+          await commitCapabilities(capabilityPlan)
+          await modelSync.sync({ ...saved, slug })
+        } else throw new Error("created connection readback differs; Bot sync deferred")
       }
       return
     }
@@ -561,18 +630,27 @@ const createEngine = (input = {}, options = {}) => {
       }
     }
 
+    await modelSync.prepare(slug, model, str(cur.defaultModel))
     const changed =
       state.connection.keyHash !== keyHash ||
       str(cur.baseUrl) !== want.baseUrl ||
       str(cur.defaultModel) !== want.model ||
       !sameSet(cur.models, want.models) ||
       !sameObj(cur.modelCapabilityRefs, want.refs)
-    if (!changed) return
-
-    if (await updateConnection(slug, want, key)) {
+    if (changed) await stageCapabilities(capabilityPlan)
+    if (changed && !await updateConnection(slug, want, key)) return
+    if (changed) {
       state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
       await saveState()
     }
+    // Reconcile even when the route is unchanged: this also repairs stale Bot
+    // IDs left by 0.3.0 or retries a Bot update after a connection write succeeded.
+    const saved = changed ? await getConnection(slug) : cur
+    if (saved && str(saved.baseUrl) === want.baseUrl && str(saved.defaultModel) === want.model && sameSet(saved.models, want.models)
+      && sameObj(saved.modelCapabilityRefs, want.refs)) {
+      await commitCapabilities(capabilityPlan)
+      await modelSync.sync({ ...saved, slug })
+    } else throw new Error("saved connection readback differs; Bot sync deferred")
   }
 
   const removeConnection = async () => {
@@ -1177,7 +1255,7 @@ const createEngine = (input = {}, options = {}) => {
   
       log(`sync (${reason}): gateway ${gwUrl}, model ${model ?? "—"}, ${models.length} model(s)`)
   
-      if (connected && opts.syncConnection) await syncConnection({ gwUrl, gwV1, key, model, models })
+      if (connected && opts.syncConnection) await syncConnection({ gwUrl, gwV1, key, model, models, descriptors: f?.models })
     } catch (e) {
       if (e?.code !== "GATEWAY_SUPERSEDED") {
         log("connection sync error:", e?.message ?? e)
@@ -1375,7 +1453,7 @@ const createEngine = (input = {}, options = {}) => {
           }
           if (info?.isDirectory()) add(await realpath(dir), dir === target && recursive, child, info)
         }
-        for (const file of [paths.bridge, paths.mcp, paths.library, paths.instructions]) {
+        for (const file of [paths.bridge, paths.mcp, paths.library, paths.instructions, paths.providers, paths.pluginProviders]) {
           await observe(dirname(file), false, basename(file))
           await observe(dirname(dirname(file)), false, basename(dirname(file)))
         }

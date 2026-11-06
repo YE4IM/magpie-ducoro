@@ -1,6 +1,6 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connect Ducoro to Magpie models and sync assigned MCP servers, skills, instructions and explicitly selected subagents.",
   "type": "module",
   "main": "./bridge.mjs",
@@ -32,13 +32,37 @@
       "syncInstructions": true,
       "syncSubagents": true,
       "targetAgents": [],
-      "subagentNames": []
+      "subagentNames": [],
+      "syncAgentModels": true,
+      "modelCapabilityRefs": {},
+      "officialProviders": [
+        "zai",
+        "zai-coding-cn",
+        "kimi-coding",
+        "moonshotai",
+        "moonshotai-cn",
+        "anthropic",
+        "openai",
+        "google",
+        "deepseek",
+        "xai",
+        "minimax",
+        "minimax-cn",
+        "alibaba",
+        "alibaba-cn"
+      ]
     }
   },
   "files": [
     "bridge.mjs",
     "ducoro.agent.js",
     "assets/",
-    "total.mjs"
-  ]
+    "total.mjs",
+    "model-sync.mjs",
+    "model-capabilities.mjs",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  }
 }
