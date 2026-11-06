@@ -1,10 +1,14 @@
-# Ducoro 0.3.4
+# Ducoro 0.3.5
 
 [简体中文](README.zh-CN.md)
 
 A Magpie plugin that synchronizes model connections, connectors, skills, instructions and selected subagents with Ducoro.
 
-Install this folder or the local package in Magpie and open **Ducoro** in the sidebar. Requires `ducoro-cli`, a running Ducoro daemon and Magpie page-service support.
+The interface automatically follows Magpie’s UI language: Simplified and Traditional Chinese use the Chinese interface; all other or unknown languages use English. There is no manual language selector or language option. Language changes update page text and accessibility labels without resetting unsaved settings or assignments. User-defined Bot, model and resource names remain unchanged. API errors and diagnostic advice follow the page language; command-line diagnostics default to English.
+
+Install this folder or `magpie-ducoro-0.3.5.tgz` in Magpie and open **Ducoro** in the sidebar to manage sync settings, Bot resources and diagnostics. Requires `ducoro-cli`, a running Ducoro daemon and Magpie page-service support.
+
+Version 0.3.5 removes the Settings panel and Agent diagnostics menu entry; their features remain available on the sidebar page. Magpie generates Installed-row descriptions from declared features, so keeping Agent integration and the sidebar page leaves two normal-state description lines. The plugin summary is now one sentence for discovery cards; it does not replace those generated lines.
 
 The resource page uses three aligned columns: models, connectors and skills. It automatically lists all Bots with read-only names and IDs. Models are single-select; library resources and account connector tools use checkboxes. Refresh preserves unsaved assignments. Unsupported Bots remain visible with explanations.
 
@@ -24,3 +28,11 @@ New options: `modelScope`, `botModels`, `accountConnectors`, `servicePort`. Exis
 
 
 MIT
+
+### Upstream model capabilities (0.3.5)
+
+Capabilities follow the catalog supplied by the installed Ducoro version. **Sync upstream model list** bypasses the bridge’s five-minute cache, reads `ducoro-cli connections catalog`, and queues capability reconciliation. Update Ducoro first to obtain its latest catalog; this action does not download or upgrade Ducoro. Expand the catalog to search model/provider IDs and context limits. Exact upstream IDs also support new model families without a plugin update.
+
+Manual references are optional overrides and take priority over automatic matching. Remove an override to return to automatic matching. A failed refresh retains the last valid catalog and existing references; refresh preserves unsaved settings. Binary connection/scope options now use switches with explicit state labels.
+
+Account connector settings open in a side drawer from **账户配置** beside each Bot’s connector heading. Closing the drawer retains the page draft; use the page’s **保存设置** button to apply changes. Escape and the close button return to the Bot card.

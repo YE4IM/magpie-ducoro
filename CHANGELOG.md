@@ -1,5 +1,23 @@
 # 更新记录
 
+## 0.3.5 — 2026-11-06
+
+0.3.5 精简 Magpie 已安装列表中的插件说明：保留 Agent 接入和侧边栏 Ducoro 配置页，取消重复的设置面板与 Agent 菜单诊断入口，正常状态下由四行功能说明减少为两行。同步开关、Bot 资源分配和实时诊断统一从侧边栏配置页使用，插件中英文摘要均精简为一句话。
+
+Version 0.3.5 reduces the normal Installed-row description from four lines to two by keeping Agent integration and the Ducoro sidebar page while removing the redundant Settings panel and Agent diagnostics menu entry. Sync settings, Bot resource assignments and live diagnostics remain on the sidebar page. Both English and Chinese plugin summaries are shortened to one sentence. The interface now follows Magpie automatically: Chinese for Simplified or Traditional Chinese, English for all other or unknown languages, with no manual language switch. Live language changes preserve unsaved settings and assignments.
+
+- Magpie 按功能声明自动生成已安装列表说明；`magpie.summary` 用于发现卡片，不能覆盖已安装列表说明。
+- 同步更新包版本、诊断报告版本、页面版本标识和安装文档至 0.3.5。
+- Bot 账户配置入口移到连接器标题右侧，使用文字按钮和数量摘要；分配方式、账户与工具选择统一在侧边抽屉中编辑，支持关闭保留草稿、Esc 退出和读取失败重试。
+- 统一卡片、标签页、输入控件、按钮与移动端布局；断开连接处理和三类资源作用域改用开关，明确显示当前状态。
+- 模型能力区域优先展示 Ducoro 上游目录：新增同步按钮、读取时间、目录搜索及上下文信息；手动覆盖和供应商排序折叠到次级设置。
+- 同步目录绕过五分钟缓存并请求能力对账；失败保留有效目录及现有参考，未保存设置与手动映射不受刷新影响。
+- 自动匹配支持上游新增系列的完整模型 ID；保持版本后缀、路由组同质性检查及手动覆盖优先级。
+- 新增完整英文界面：通过 Magpie 页面协议识别界面语言，简体与繁体中文使用中文，其余语言及未知语言回退英文，不提供手动语言开关。
+- Magpie 语言变更时直接更新页面文案和辅助标签，不重建控件，不影响未保存的设置与分配；模型、Bot 和资源名称保持原样。
+- 统一翻译配置页、模型目录、账户抽屉、校验错误、接口提示和诊断建议；命令行诊断默认输出英文。
+- 发布目录清理测试文件、失效测试命令及已取消入口的旧面板文件；安装包和源码包仅保留运行与项目维护所需文件。
+
 ## 0.3.4 — 2026-11-06
 
 0.3.4 带来全新的可视化配置页面，在一处管理模型、连接器与技能，支持全局同步和按 Bot 单独分配。模型可跟随 Magpie 默认设置或为指定 Bot 固定选择，连接器同时支持 Magpie 资源库与 Ducoro 账户来源。新版诊断报告每次查看时按需生成，无需导入文件，也不会在本机保存或累积历史报告，并清晰区分查看时间与最近同步时间。同时修复插件重载后页面连接失败的问题，完善自动重连、失败提示与配置校验，让配置和排查更加方便。

@@ -10,9 +10,11 @@ export const OFFICIAL_PROVIDERS = [
 
 // Normalize formatting only. Versions, context variants, dates and suffixes
 // remain significant: k3.1-pro is never shortened to k3, nor Flash to base GLM.
-export function modelIdentity(value) {
-  let name = text(value).split(' · ')[0].toLowerCase()
+const normalizedIdentity = value => text(value).split(' · ')[0].toLowerCase()
     .replace(/[\s_\u2010-\u2015]+/g, '-').replace(/-+/g, '-')
+
+export function modelIdentity(value) {
+  let name = normalizedIdentity(value)
   if (/^k\d/.test(name)) name = `kimi-${name}`
   return /^(?:glm-\d|kimi-k\d|deepseek-|claude-|gpt-|o\d(?:-|$)|gemini-|grok-|qwen\d|minimax-)/.test(name) ? name : null
 }
@@ -40,10 +42,10 @@ function modelIndex(exported, providers, pluginProviders) {
   return index
 }
 
-function identityFor(id, index) {
+function identityFor(id, index, identity = modelIdentity) {
   const model = index.get(id)
-  const fromId = modelIdentity(id.split('/').at(-1))
-  const fromName = modelIdentity(model?.name)
+  const fromId = identity(id.split('/').at(-1))
+  const fromName = identity(model?.name)
   // Conflicting recognized IDs/names are evidence of an alias requiring review.
   return fromId && fromName && fromId !== fromName ? null : fromId ?? fromName
 }
@@ -91,10 +93,14 @@ export function resolveCapabilityMappings({
     .filter(group => text(group?.id)).map(group => [`group/${group.id}`, group]))
   const entries = [], refs = {}, automatic = {}, manual = {}
   const cat = Array.isArray(catalog) ? catalog.filter(c => text(c?.provider) && text(c?.id)) : null
+  // Exact IDs supplied by upstream recognize new model families without a
+  // plugin release. Formatting normalization never removes version suffixes.
+  const upstreamIds = new Set((cat ?? []).map(c => normalizedIdentity(c.id)).filter(Boolean))
+  const identityOf = value => modelIdentity(value) ?? (upstreamIds.has(normalizedIdentity(value)) ? normalizedIdentity(value) : null)
   const coordinate = entry => `${entry.provider}/${entry.id}`
   const catalogEntry = ref => cat?.find(c => coordinate(c) === ref)
   const candidatesFor = identity => identity ? (cat ?? []).filter(c =>
-    (modelIdentity(c.id) ?? modelIdentity(c.name)) === identity) : []
+    (identityOf(c.id) ?? identityOf(c.name)) === identity) : []
   const expand = (id, stack = new Set()) => {
     if (!id.startsWith('group/')) return { members: [id] }
     if (stack.has(id)) return { members: [], error: 'cyclic-group' }
@@ -118,13 +124,13 @@ export function resolveCapabilityMappings({
       ? previous.pending.provenance : previous
     const expanded = expand(id)
     const members = expanded.members
-    const identities = [...new Set(members.map(member => identityFor(member, index)).filter(Boolean))].sort()
-    const unknown = members.some(member => !identityFor(member, index))
+    const identities = [...new Set(members.map(member => identityFor(member, index, identityOf)).filter(Boolean))].sort()
+    const unknown = members.some(member => !identityFor(member, index, identityOf))
     const identity = !unknown && identities.length === 1 ? identities[0] : null
     const candidates = candidatesFor(identity)
     const official = candidates.filter(c => officialProviders.includes(c.provider)).sort((a, b) =>
       officialProviders.indexOf(a.provider) - officialProviders.indexOf(b.provider)
-      || Number(modelIdentity(b.id) === identity) - Number(modelIdentity(a.id) === identity)
+      || Number(identityOf(b.id) === identity) - Number(identityOf(a.id) === identity)
       || coordinate(a).localeCompare(coordinate(b)))
     const best = official[0]
     const common = members.length ? commonCapabilities(members, index) : null
@@ -150,9 +156,9 @@ export function resolveCapabilityMappings({
       // Upgrade legacy exact-ID mappings from 0.3.0/early 0.3.1. An existing
       // official or different-model choice is treated as an explicit selection.
       const saved = catalogEntry(previousRef)
-      const legacyIdentity = modelIdentity(id.split('/').at(-1)) ?? modelIdentity(index.get(id)?.name)
+      const legacyIdentity = identityOf(id.split('/').at(-1)) ?? identityOf(index.get(id)?.name)
       const legacy = saved && !officialProviders.includes(saved.provider)
-        && (modelIdentity(saved.id) ?? modelIdentity(saved.name)) === legacyIdentity
+        && (identityOf(saved.id) ?? identityOf(saved.name)) === legacyIdentity
       isManual = !legacy
     }
     let ref = null, source = 'none'
@@ -175,10 +181,47 @@ export function resolveCapabilityMappings({
     if (common && (!common.contextComplete || common.thinkingLevels === null)) warnings.push('member-capabilities-incomplete')
     if (source === 'manual' && ref && cat && !catalogEntry(ref)) warnings.push('manual-reference-not-in-catalog')
     const selected = catalogEntry(ref)
-    if (identity && selected && (modelIdentity(selected.id) ?? modelIdentity(selected.name)) !== identity) warnings.push('reference-model-differs')
+    if (identity && selected && (identityOf(selected.id) ?? identityOf(selected.name)) !== identity) warnings.push('reference-model-differs')
     if (ref && ref !== (best && coordinate(best))) warnings.push(...capabilityIssues(catalogEntry(ref), common ?? {}))
     entries.push({ id, status, source, reference: ref, identities, members, commonCapabilities: common,
       candidates: (identity ? candidates : identities.flatMap(candidatesFor)).map(coordinate).slice(0, 12), warnings: [...new Set(warnings)] })
   }
   return { refs, entries, provenance: { automatic, manual } }
+}
+
+// One in-memory catalog is shared by automatic matching and the settings page.
+// A failed refresh never replaces the last valid upstream snapshot.
+export function createCapabilityCatalog({ run, now = Date.now, log = () => {} }) {
+  let models = null, updatedAt = 0, pending = null, stale = false
+  const load = async (force = false) => {
+    if (!force && models && now() - updatedAt < 5 * 60_000) return models
+    if (!pending) pending = (async () => {
+      const result = await run(['connections', 'catalog'], { timeoutMs: 30_000 })
+      if (!result.ok || !Array.isArray(result.json) || !result.json.length
+        || result.json.some(model => !text(model?.provider) || !text(model?.id))) throw Error('catalog-unavailable')
+      models = result.json
+      updatedAt = now()
+      stale = false
+      return models
+    })()
+    const request = pending
+    try { return await request }
+    catch {
+      stale = true
+      if (force) throw Error('无法同步 Ducoro 模型目录，请确认 Ducoro 后台已启动并更新后重试。现有能力参考已保留。')
+      log('connections catalog unavailable; retaining previous capability references')
+      return models
+    } finally { if (pending === request) pending = null }
+  }
+  return {
+    load,
+    async snapshot(force = false) {
+      const catalog = await load(force)
+      if (!catalog) throw Error('Ducoro 模型目录暂不可用，请启动 Ducoro 后重试。')
+      return { updatedAt: new Date(updatedAt).toISOString(), stale, models: catalog.map(model => ({
+        provider: model.provider, id: model.id, name: text(model.name) || model.id,
+        contextWindow: Number.isSafeInteger(model.contextWindow) && model.contextWindow > 0 ? model.contextWindow : null,
+      })) }
+    },
+  }
 }

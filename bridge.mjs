@@ -47,7 +47,7 @@ import { pathToFileURL } from "node:url"
 
 import { createTotalSync } from "./total.mjs"
 import { createModelSync } from "./model-sync.mjs"
-import { OFFICIAL_PROVIDERS, resolveCapabilityMappings } from "./model-capabilities.mjs"
+import { OFFICIAL_PROVIDERS, resolveCapabilityMappings, createCapabilityCatalog } from "./model-capabilities.mjs"
 import { mcpCommand, needsResourceTargets, planResourceScopes, scopedLibrary, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
 import { createDiagnostics, removeLegacyReports } from "./diagnostics.mjs"
 import { validateOptions } from "./options.mjs"
@@ -461,20 +461,8 @@ const createEngine = (input = {}, options = {}) => {
   // Map magpie model ids ("zcode/GLM-5.3-Flash") to Ducoro catalog entries
   // ("zai/glm-5.3-flash") so explicit thinking levels resolve. Best effort:
   // refs are optional in Ducoro.
-  let catalogCache = null
-  let catalogAt = 0
-
-  const loadCatalog = async () => {
-    if (catalogCache && Date.now() - catalogAt < 5 * 60_000) return catalogCache
-    const r = await run(["connections", "catalog"], { timeoutMs: 30_000 })
-    if (!r.ok || !Array.isArray(r.json)) {
-      if (!catalogCache) log("connections catalog unavailable; capability refs skipped")
-      return catalogCache
-    }
-    catalogCache = r.json
-    catalogAt = Date.now()
-    return catalogCache
-  }
+  const capabilityCatalog = createCapabilityCatalog({ run, log })
+  const loadCatalog = () => capabilityCatalog.load()
 
   const refsFor = async (ids, existing, descriptors) => {
     const [cat, providers, pluginProviders] = await Promise.all([
@@ -1627,7 +1615,8 @@ const createEngine = (input = {}, options = {}) => {
     watching = true
     if (!dryRun) await removeLegacyReports(stateDir)
     if (!dryRun) pageService = await createPageService({ options: opts, paths, stateDir, run, trigger,
-      getReport: () => diagnostics.read({ syncing }), log })
+      getReport: () => diagnostics.read({ syncing }),
+      getModelCatalog: force => capabilityCatalog.snapshot(force), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)

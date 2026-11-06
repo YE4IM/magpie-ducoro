@@ -1,3 +1,4 @@
+import './ui/i18n.js'
 // Public diagnostics contain configuration facts only. Never copy CLI output,
 // raw exception messages, resource contents, credentials or endpoint URLs here.
 import { readFile, readdir, rm } from 'node:fs/promises'
@@ -104,7 +105,7 @@ function summarize(report) {
 }
 
 export function buildDiagnostics({ options = {}, reason, stages = {}, retries = [], state = {}, total, capabilities, startedAt, roundId, now = new Date() } = {}) {
-  const report = { schemaVersion: 1, pluginVersion: '0.3.4', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.3.5', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(roundId)) report.roundId = roundId
   for (const feature of FEATURES) {
     report.features[feature] = safeFeature(stages[feature])
@@ -170,7 +171,7 @@ function safeReason(reason) {
 // never become part of a support export or the CLI's output.
 export function sanitizeDiagnostics(input) {
   if (!object(input) || input.schemaVersion !== 1 || !object(input.features) || !timestamp(input.updatedAt)) return null
-  const report = { schemaVersion: 1, pluginVersion: '0.3.4', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.3.5', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(input.roundId)) report.roundId = input.roundId
   for (const feature of FEATURES) report.features[feature] = safeFeature(input.features[feature])
   for (const feature of FEATURES) {
@@ -221,11 +222,11 @@ export async function readDiagnostics({ stateDir = defaultStateDir(), port = 348
     })
     const report = sanitizeDiagnostics(value)
     if (!report) throw Error()
-    return { ...report, lastSyncedAt: timestamp(value.lastSyncedAt), syncing: value.syncing === true, stale: value.stale === true, observedAt: new Date(now).toISOString() }
+    return globalThis.DucoroI18n.localizeReport({ ...report, lastSyncedAt: timestamp(value.lastSyncedAt), syncing: value.syncing === true, stale: value.stale === true, observedAt: new Date(now).toISOString() }, value.language)
   } catch {
     const report = buildDiagnostics({ now })
     addIssue(report, 'service-unavailable', FEATURES, [], { pending: false })
-    return { ...summarize(report), lastSyncedAt: null, stale: true, observedAt: new Date(now).toISOString() }
+    return globalThis.DucoroI18n.localizeReport({ ...summarize(report), lastSyncedAt: null, stale: true, observedAt: new Date(now).toISOString() }, 'en')
   }
 }
 

@@ -1,14 +1,18 @@
+{
+const { t } = globalThis.DucoroI18n;
 // Shared pure helpers; classic scripts work in Magpie's opaque-origin sandbox.
-(() => {
+globalThis.DucoroUIReady = (async () => {
+if (globalThis.DucoroLanguageReady) await globalThis.DucoroLanguageReady
+else globalThis.DucoroI18n.applyDocument('en')
 // Browser-only data helpers. Keep this folder self-contained: Magpie serves
 // only files below page.file's directory to its isolated plugin page.
 const SWITCHES = [
-  ['syncConnection', '网关连接', '同步连接地址、密钥与模型目录'],
-  ['syncAgentModels', 'Bot 模型跟随', '更新绑定 Bot，修复失效模型 ID'],
-  ['syncMcp', '连接器', '同步资源库连接器与 Bot 账户工具配备'],
-  ['syncSkills', '技能', '同步完整技能包与附属文件'],
-  ['syncInstructions', '指令', '同步到目标 Bot 的指令区块'],
-  ['syncSubagents', '子代理', '同步显式选择的角色定义'],
+  ['syncConnection', t('网关连接'), t('同步连接地址、密钥与模型目录')],
+  ['syncAgentModels', t('Bot 模型跟随'), t('更新绑定 Bot，修复失效模型 ID')],
+  ['syncMcp', t('连接器'), t('同步资源库连接器与 Bot 账户工具配备')],
+  ['syncSkills', t('技能'), t('同步完整技能包与附属文件')],
+  ['syncInstructions', t('指令'), t('同步到目标 Bot 的指令区块')],
+  ['syncSubagents', t('子代理'), t('同步显式选择的角色定义')],
 ]
 const DEFAULT_OPTIONS = {
   connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
@@ -28,36 +32,36 @@ const splitList = value => [...new Set(String(value).split(/[,\r\n]/).map(s => s
 const coordinate = value => typeof value === 'string' && /^[^\s,=]+\/[^\s,=]+$/.test(value)
 
 function optionsForDisplay(raw = {}) {
-  if (!isRecord(raw)) throw Error('插件选项格式无效，请先在 Magpie 的 JSON 选项中修复。')
+  if (!isRecord(raw)) throw Error(t('插件选项格式无效，请先在 Magpie 的 JSON 选项中修复。'))
   const result = { ...structuredClone(DEFAULT_OPTIONS), ...structuredClone(raw) }
   validateFields(result)
   return result
 }
 
 function validateFields(value) {
-  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw Error(`${key} 必须是开关值。`)
-  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw Error('连接标识仅支持小写字母、数字和短横线。')
-  if (!['keep', 'remove'].includes(value.onDisconnect)) throw Error('请选择有效的断开连接处理方式。')
-  if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw Error('模型或连接器分配格式无效。')
-  if (!['global', 'agents'].includes(value.mcpScope)) throw Error('请选择有效的 连接器 作用域。')
-  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw Error('技能作用域需要一个有效的 Bot ID。')
+  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw Error(t`${key} 必须是开关值。`)
+  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw Error(t('连接标识仅支持小写字母、数字和短横线。'))
+  if (!['keep', 'remove'].includes(value.onDisconnect)) throw Error(t('请选择有效的断开连接处理方式。'))
+  if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw Error(t('模型或连接器分配格式无效。'))
+  if (!['global', 'agents'].includes(value.mcpScope)) throw Error(t('请选择有效的 连接器 作用域。'))
+  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw Error(t('技能作用域需要一个有效的 Bot ID。'))
   for (const key of ['targetAgents', 'subagentNames', 'officialProviders']) {
-    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw Error(`${key} 需要名称列表。`)
-    if (value[key].length > 256) throw Error('单个列表最多支持 256 项。')
+    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw Error(t`${key} 需要名称列表。`)
+    if (value[key].length > 256) throw Error(t('单个列表最多支持 256 项。'))
   }
-  if (!value.targetAgents.every(botId)) throw Error('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。')
-  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw Error('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。')
-  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw Error('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。')
-  if (!isRecord(value.modelCapabilityRefs)) throw Error('模型能力参考需要映射对象。')
+  if (!value.targetAgents.every(botId)) throw Error(t('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。'))
+  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw Error(t('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。'))
+  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw Error(t('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。'))
+  if (!isRecord(value.modelCapabilityRefs)) throw Error(t('模型能力参考需要映射对象。'))
   for (const [route, ref] of Object.entries(value.modelCapabilityRefs)) {
-    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw Error('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。')
+    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw Error(t('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。'))
   }
-  if (!isRecord(value.resourceAssignments)) throw Error('Bot 资源分配需要对象。')
+  if (!isRecord(value.resourceAssignments)) throw Error(t('Bot 资源分配需要对象。'))
   for (const [id, assignment] of Object.entries(value.resourceAssignments)) {
-    if (!botId(id)) throw Error('资源分配中的 Bot ID 格式应为 agt-…。')
-    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw Error('Bot 资源分配仅支持 连接器 和技能。')
+    if (!botId(id)) throw Error(t('资源分配中的 Bot ID 格式应为 agt-…。'))
+    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw Error(t('Bot 资源分配仅支持 连接器 和技能。'))
     for (const key of ['mcp', 'skills']) if (Object.hasOwn(assignment, key)) {
-      if (!Array.isArray(assignment[key]) || assignment[key].length > 256 || !assignment[key].every(s => typeof s === 'string' && s.trim() && !/[,\r\n]/.test(s))) throw Error('自定义资源请填写资源库名称列表，留空代表不分配。')
+      if (!Array.isArray(assignment[key]) || assignment[key].length > 256 || !assignment[key].every(s => typeof s === 'string' && s.trim() && !/[,\r\n]/.test(s))) throw Error(t('自定义资源请填写资源库名称列表，留空代表不分配。'))
     }
   }
   return value
@@ -71,20 +75,20 @@ function mergeEditedOptions(rawCurrent, baseline, edited, keys = EDITABLE_KEYS) 
   const current = optionsForDisplay(rawCurrent)
   const changed = keys.filter(key => stable(edited[key]) !== stable(baseline[key]))
   for (const key of changed) if (stable(current[key]) !== stable(baseline[key]) && stable(current[key]) !== stable(edited[key])) {
-    throw Error('这些设置已在其他页面更新。请点击「重新读取」后再修改，避免覆盖新配置。')
+    throw Error(t('这些设置已在其他页面更新。请点击「重新读取」后再修改，避免覆盖新配置。'))
   }
   return { options: { ...rawCurrent, ...Object.fromEntries(changed.map(key => [key, edited[key]])) }, changed }
 }
 
-const FEATURE_NAMES = { connection: '网关连接', models: '模型与能力', mcp: '连接器', skills: '技能', instructions: '指令', subagents: '子代理' }
-const STATUS_NAMES = { configured: '配置已同步', pending: '等待处理', disabled: '已关闭', skipped: '已跳过', unknown: '尚未确认' }
+const FEATURE_NAMES = { connection: t('网关连接'), models: t('模型与能力'), mcp: t('连接器'), skills: t('技能'), instructions: t('指令'), subagents: t('子代理') }
+const STATUS_NAMES = { configured: t('配置已同步'), pending: t('等待处理'), disabled: t('已关闭'), skipped: t('已跳过'), unknown: t('尚未确认') }
 const safeText = (value, fallback = '') => typeof value === 'string' ? value.slice(0, 2000) : fallback
 const stringList = value => Array.isArray(value) ? value.filter(x => typeof x === 'string').slice(0, 256).map(x => x.slice(0, 200)) : []
 
 function parseDiagnosticReport(raw) {
-  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error('实时诊断报告格式无法识别，请更新插件并重新打开页面。')
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error(t('实时诊断报告格式无法识别，请更新插件并重新打开页面。'))
   const issues = Array.isArray(raw.issues) ? raw.issues : []
-  const cleanIssue = issue => ({ feature: safeText(issue.feature), code: safeText(issue.code), message: safeText(issue.message, '需要进一步检查'), nextAction: safeText(issue.nextAction), targets: stringList(issue.targets) })
+  const cleanIssue = issue => ({ feature: safeText(issue.feature), code: safeText(issue.code), message: safeText(issue.message, t('需要进一步检查')), nextAction: safeText(issue.nextAction), targets: stringList(issue.targets) })
   return {
     updatedAt: typeof raw.updatedAt === 'string' && Number.isFinite(Date.parse(raw.updatedAt)) ? raw.updatedAt : null,
     lastSyncedAt: typeof raw.lastSyncedAt === 'string' && Number.isFinite(Date.parse(raw.lastSyncedAt)) ? raw.lastSyncedAt : null,
@@ -101,3 +105,5 @@ function parseDiagnosticReport(raw) {
 
 globalThis.DucoroUI = Object.freeze({ SWITCHES, DEFAULT_OPTIONS, EDITABLE_KEYS, FEATURE_NAMES, STATUS_NAMES, splitList, optionsForDisplay, validateFields, mergeEditedOptions, parseDiagnosticReport })
 })()
+
+}

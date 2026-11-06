@@ -4,22 +4,25 @@
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { realpath } from 'node:fs/promises'
+import './ui/i18n.js'
+const t = (strings, ...values) => String(globalThis.DucoroI18n.t(strings, ...values))
 import { readDiagnostics, defaultStateDir } from './diagnostics.mjs'
 
-const LABELS = { connection: '连接', models: 'Bot 模型', mcp: 'MCP', skills: '技能', instructions: '指令', subagents: '子代理' }
-const STATUS = { configured: '配置已对账', pending: '待处理', disabled: '已关闭', skipped: '本轮未配置', unknown: '未知' }
+const LABELS = { connection: t('连接'), models: t('Bot 模型'), mcp: 'MCP', skills: t('技能'), instructions: t('指令'), subagents: t('子代理') }
+const STATUS = { configured: t('配置已对账'), pending: t('待处理'), disabled: t('已关闭'), skipped: t('本轮未配置'), unknown: t('未知') }
 
 export function formatDiagnostics(report) {
-  const lines = [`Ducoro 同步诊断 · ${report.pluginVersion}`, `查看时间：${report.updatedAt}`, `最近同步：${report.lastSyncedAt || '尚未完成同步'}${report.stale ? '（同步结果待更新）' : ''}`, '报告按需生成，不保存本地文件。', `整体：${STATUS[report.status] || '未知'}`, '会话加载状态：未知；保存配置不代表运行中的会话已加载。', '']
-  for (const [feature, row] of Object.entries(report.features)) lines.push(`${LABELS[feature]}：${row.skipReason === 'not-selected' ? '未选择资源' : STATUS[row.status]}${row.count === undefined ? '' : ` · ${row.count} 项`}${row.targets.length ? ` · ${row.targets.join(', ')}` : ''}`)
+  report = globalThis.DucoroI18n.localizeReport(report, 'en')
+  const lines = [t`Ducoro 同步诊断 · ${report.pluginVersion}`, t`查看时间：${report.updatedAt}`, t`最近同步：${report.lastSyncedAt || t('尚未完成同步')}${report.stale ? t('（同步结果待更新）') : ''}`, t('报告按需生成，不保存本地文件。'), t`整体：${STATUS[report.status] || t('未知')}`, t('会话加载状态：未知；保存配置不代表运行中的会话已加载。'), '']
+  for (const [feature, row] of Object.entries(report.features)) lines.push(`${LABELS[feature]}: ${row.skipReason === 'not-selected' ? t('未选择资源') : STATUS[row.status]}${row.count === undefined ? '' : t` · ${row.count} 项`}${row.targets.length ? ` · ${row.targets.join(', ')}` : ''}`)
   const seen = new Set()
   for (const issue of report.issues) {
     const key = issue.code + issue.message
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push('', `[${issue.code}] ${issue.message}`, `下一步：${issue.nextAction}`)
+    lines.push('', `[${issue.code}] ${issue.message}`, t`下一步：${issue.nextAction}`)
   }
-  if (report.doctor) lines.push('', `Ducoro 守护进程：${report.doctor.status === 'reachable' ? '可连接（只读 info 检查）' : '不可确认'}`, report.doctor.nextAction || '')
+  if (report.doctor) lines.push('', t`Ducoro 守护进程：${report.doctor.status === 'reachable' ? t('可连接（只读 info 检查）') : t('不可确认')}`, report.doctor.nextAction || '')
   return lines.filter((line, i, all) => line || all[i - 1] !== '').join('\n')
 }
 
@@ -31,18 +34,18 @@ export async function checkDaemon({ cli = 'ducoro-cli', timeoutMs = 5000 } = {})
     let child
     let timer
     try { child = spawn(cli, ['info', '--json'], { stdio: ['ignore', 'pipe', 'ignore'] }) }
-    catch { finish({ status: 'unavailable', code: 'cli-unavailable', nextAction: '确认 Ducoro CLI 已安装且命令路径可用。' }); return }
-    timer = setTimeout(() => { child.kill('SIGKILL'); finish({ status: 'unavailable', code: 'daemon-timeout', nextAction: '确认 Ducoro 正在运行，然后重新检查。' }) }, timeoutMs)
+    catch { finish({ status: 'unavailable', code: 'cli-unavailable', nextAction: t('确认 Ducoro CLI 已安装且命令路径可用。') }); return }
+    timer = setTimeout(() => { child.kill('SIGKILL'); finish({ status: 'unavailable', code: 'daemon-timeout', nextAction: t('确认 Ducoro 正在运行，然后重新检查。') }) }, timeoutMs)
     child.stdout.on('data', chunk => {
-      if (stdout.length + chunk.length > 2 * 1024 * 1024) { child.kill('SIGKILL'); finish({ status: 'unavailable', code: 'daemon-invalid', nextAction: 'Ducoro 返回了无法识别的状态，请检查 CLI 版本。' }); return }
+      if (stdout.length + chunk.length > 2 * 1024 * 1024) { child.kill('SIGKILL'); finish({ status: 'unavailable', code: 'daemon-invalid', nextAction: t('Ducoro 返回了无法识别的状态，请检查 CLI 版本。') }); return }
       stdout += chunk.toString()
     })
-    child.on('error', () => finish({ status: 'unavailable', code: 'cli-unavailable', nextAction: '确认 Ducoro CLI 已安装且命令路径可用。' }))
+    child.on('error', () => finish({ status: 'unavailable', code: 'cli-unavailable', nextAction: t('确认 Ducoro CLI 已安装且命令路径可用。') }))
     child.on('close', code => {
       let value
       try { value = JSON.parse(stdout) } catch {}
       const okay = code === 0 && value && typeof value === 'object' && !Array.isArray(value) && !value.error && typeof value.serverVersion === 'string' && value.serverVersion.length > 0
-      finish(okay ? { status: 'reachable', code: 'daemon-reachable', nextAction: '此检查只证明 info 请求成功，不证明模型或工具可用。' } : { status: 'unavailable', code: 'daemon-unavailable', nextAction: '确认 Ducoro 正在运行并检查 CLI 与守护进程版本。' })
+      finish(okay ? { status: 'reachable', code: 'daemon-reachable', nextAction: t('此检查只证明 info 请求成功，不证明模型或工具可用。') } : { status: 'unavailable', code: 'daemon-unavailable', nextAction: t('确认 Ducoro 正在运行并检查 CLI 与守护进程版本。') })
     })
   })
 }
