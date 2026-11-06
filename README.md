@@ -87,11 +87,7 @@ Set with `magpie plugin options magpie-ducoro '<json>'` or in the app's plugin o
 
 ## Validation
 
-```sh
-npm test
-```
-
-Tests use isolated temporary directories and a fake `ducoro-cli`; they do not change installed Ducoro/Magpie configuration or call an LLM. They cover model ID repair, capability mapping, supported controls, default changes, opt-out and target scoping, connection failures, retry after restart, response loss, verification failures, repeated synchronization, independent group mappings, official provider preference, exact variant matching, mixed/nested/cyclic groups, capability differences, manual mappings, metadata recovery and provenance.
+Before release, 57 isolated tests passed. This trimmed source distribution omits the test suite and development-only documentation.
 
 ## Notes
 

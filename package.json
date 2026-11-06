@@ -61,8 +61,5 @@
     "model-sync.mjs",
     "model-capabilities.mjs",
     "CHANGELOG.md"
-  ],
-  "scripts": {
-    "test": "node --test"
-  }
+  ]
 }
