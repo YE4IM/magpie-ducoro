@@ -2,9 +2,9 @@
 
 ## 0.3.5 — 2026-11-06
 
-0.3.5 精简 Magpie 已安装列表中的插件说明：保留 Agent 接入和侧边栏 Ducoro 配置页，取消重复的设置面板与 Agent 菜单诊断入口，正常状态下由四行功能说明减少为两行。同步开关、Bot 资源分配和实时诊断统一从侧边栏配置页使用，插件中英文摘要均精简为一句话。
+0.3.5 优化了配置界面与资源分配体验：账户连接器改用侧边抽屉管理，模型能力支持同步、搜索 Ducoro 上游目录，同时精简 Magpie 插件列表中的重复说明与入口。新版界面自动跟随 Magpie 的语言设置，简体和繁体中文使用中文，其余语言使用英文，无需手动切换；语言变化时保留未保存的设置与分配草稿。
 
-Version 0.3.5 reduces the normal Installed-row description from four lines to two by keeping Agent integration and the Ducoro sidebar page while removing the redundant Settings panel and Agent diagnostics menu entry. Sync settings, Bot resource assignments and live diagnostics remain on the sidebar page. Both English and Chinese plugin summaries are shortened to one sentence. The interface now follows Magpie automatically: Chinese for Simplified or Traditional Chinese, English for all other or unknown languages, with no manual language switch. Live language changes preserve unsaved settings and assignments.
+0.3.5 improves the settings interface and resource assignment experience. Account connectors are now managed in a side drawer, the model capability catalog can be refreshed and searched, and redundant descriptions and entry points in Magpie’s plugin list have been reduced. The interface automatically follows Magpie’s language settings, displaying Chinese for Simplified or Traditional Chinese and English for all other languages. No manual language switch is needed, and language changes preserve unsaved settings and assignment drafts.
 
 - Magpie 按功能声明自动生成已安装列表说明；`magpie.summary` 用于发现卡片，不能覆盖已安装列表说明。
 - 同步更新包版本、诊断报告版本、页面版本标识和安装文档至 0.3.5。
