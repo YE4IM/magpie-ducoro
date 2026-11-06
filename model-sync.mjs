@@ -20,7 +20,7 @@ export function compatiblePreference(preference, model, info) {
   return next
 }
 
-export function createModelSync({ opts, run, getState, save, requestRetry, log, isCurrent = () => true }) {
+export function createModelSync({ opts, run, getState, save, requestRetry, log, isCurrent = () => true, onStatus = () => {} }) {
   const call = async args => {
     if (!isCurrent()) throw Error('model sync superseded by a gateway change')
     const result = await run(args, { timeoutMs: 30_000 })
@@ -51,6 +51,7 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
     const eligible = bot => bot?.modelPreference?.connectionSlug === slug && bot.modelPreference.runtime === 'pi-agent'
       && (!Array.isArray(opts.targetAgents) || !opts.targetAgents.length || opts.targetAgents.includes(bot.id))
     const bots = all.filter(eligible)
+    onStatus('unknown', { targets: bots.map(bot => bot.id), count: bots.length })
     let infos = []
     if (bots.length) {
       const status = await call(['connections', 'list', '--with-status'])
@@ -95,6 +96,7 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
       delete state.modelMigration
       await save()
     }
+    onStatus(complete ? 'configured' : 'pending', { targets: bots.map(bot => bot.id), count: bots.length })
   }
   return { prepare, sync }
 }

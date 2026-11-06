@@ -17,6 +17,55 @@ magpie plugin add github:YE4IM/magpie-ducoro
 - `ducoro.agent.js` 在 magpie 的 Agent 页声明一行 **Ducoro**。这一行连接并选择模型后，magpie 会把网关地址、按 agent 的网关密钥和所选模型写入 `~/.ducoro/magpie-agent.json`，并把资源库勾选的 MCP 服务器写入 `~/.ducoro/magpie-mcp.json`、技能写入 `~/.ducoro/magpie-skills/`。
 - `bridge.mjs`（插件主模块）监视这些文件，通过 `ducoro-cli` 让 Ducoro 保持同步——本包不直接与 Ducoro 通信。
 
+## 0.3.2：控制台、统一诊断与按 Bot 分配资源
+
+在 Magpie 中打开插件的 **Ducoro 控制台**，可用表单设置同步开关、目标 Bot、资源作用域、子代理名和官方模型能力参考。设置 → 插件中也会显示简要配置面板；Agent 行菜单的“Ducoro 同步诊断”会打开诊断页。保存选项由 Magpie 触发宿主重载，随后自动对账。
+
+### 按 Bot 分配 MCP 和技能
+
+默认仍将 MCP 和技能同步到全局。把 `mcpScope` 或 `skillsScope` 设为 `agents` 后，按 Bot 写入资源。`targetAgents` 非空时限定为明确列出的 Bot，否则使用绑定 `connectionSlug` 的适用 Bot。资源清单填写 **Magpie 资源库中的名称**，并且只有已启用、已分配给 Ducoro 的条目才会同步。
+
+```json
+{
+  "mcpScope": "agents",
+  "skillsScope": "agents",
+  "targetAgents": ["agt-coder", "agt-writer"],
+  "resourceAssignments": {
+    "agt-coder": { "mcp": ["repo-tools"], "skills": ["code-review"] },
+    "agt-writer": { "mcp": [], "skills": ["writing"] }
+  }
+}
+```
+
+省略某个 Bot 或它的 `mcp` / `skills` 字段，表示继承资源库已分配的全部对应资源；空数组 `[]` 表示不分配该类资源。控制台会明确显示这两种模式。`skillsScope` 也继续支持直接填写单个 Bot ID。关闭资源同步、取消资源勾选或缩小目标范围时，移除插件拥有的对应条目；`prune: false` 不会保留已撤销的分配。切换作用域会迁移插件管理的条目，同名的用户自建条目会保留并报告冲突。
+
+这里的分配管理本插件创建的资源。Ducoro 中其他全局资源仍按它自身的继承规则生效，不会因为这里选择空清单而被屏蔽。
+
+### 统一诊断
+
+每轮同步会在 `<Magpie config>/ducoro-bridge/sync-status.json` 生成报告，覆盖连接、Bot 模型、MCP、技能、指令与子代理，包含状态、受影响 Bot 和下一步操作。支持 `DUCORO_BRIDGE_STATE_DIR` 自定义报告目录。
+
+在本插件文件夹中运行：
+
+```sh
+npm run diagnostics
+npm run diagnostics -- --json
+npm run diagnostics -- --doctor
+node diagnostics-cli.mjs --json > /tmp/ducoro-sync-status.json
+```
+
+诊断命令只读；`--doctor` 检查 CLI 和守护进程，不运行模型请求、不自动重启会话。将生成的 JSON 导入控制台“诊断”页，即可查看快照及生成时间。Magpie 的公开页面接口不能直接读取本地报告，因此页面不会自动获取实时状态，也不会将诊断内容写入插件选项。报告缺失、过期、部分失败和未完成检查会明确标示；“已配置”只代表配置层状态，运行中会话是否已加载保持“未知”。
+
+公开新增选项：
+
+| 选项 | 默认 | 含义 |
+| --- | --- | --- |
+| `mcpScope` | `global` | `global` 或 `agents`。 |
+| `skillsScope` | `global` | `global`、`agents` 或单个 Bot ID。 |
+| `resourceAssignments` | `{}` | Bot ID → MCP / 技能名称清单；字段省略继承，空数组不分配。 |
+
+配置校验失败时会停止同步并报告待修正的字段，避免把错误清单解释为全部资源。
+
 ## 模型同步
 
 *0.3.1 新增。*

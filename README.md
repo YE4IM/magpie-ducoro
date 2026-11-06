@@ -17,6 +17,53 @@ In the app: Plugins → Add plugin → enter `github:YE4IM/magpie-ducoro`.
 - `ducoro.agent.js` declares a **Ducoro** agent row on magpie's Agent page. When the row is connected and a model is picked, magpie writes the gateway URL, the per-agent gateway key and the selected model to `~/.ducoro/magpie-agent.json`, plus the library's MCP servers to `~/.ducoro/magpie-mcp.json` and library skills to `~/.ducoro/magpie-skills/`.
 - `bridge.mjs` (the plugin main module) watches those artifacts and keeps Ducoro in sync through `ducoro-cli` — nothing in this package talks to Ducoro directly.
 
+## 0.3.2: console, unified diagnostics and per-Bot resources
+
+Open the plugin's **Ducoro** page in Magpie to configure sync switches, target Bots, resource scopes, selected subagents and model capability references. A compact panel is also available under Settings → Plugins. The Agent context-menu diagnostics action opens this page. Saving uses Magpie's options bridge, which reloads the host and reconciles the configuration.
+
+### Per-Bot MCP and skills
+
+Global synchronization remains the default. Set `mcpScope` or `skillsScope` to `agents` for Bot-local definitions. A non-empty `targetAgents` selects explicit Bots; otherwise eligible Bots bound to `connectionSlug` are used. Resource lists use **Magpie library names**, always intersected with enabled resources assigned to Ducoro.
+
+```json
+{
+  "mcpScope": "agents",
+  "skillsScope": "agents",
+  "targetAgents": ["agt-coder", "agt-writer"],
+  "resourceAssignments": {
+    "agt-coder": { "mcp": ["repo-tools"], "skills": ["code-review"] },
+    "agt-writer": { "mcp": [], "skills": ["writing"] }
+  }
+}
+```
+
+Omitting a Bot or its `mcp` / `skills` field inherits all library-selected resources of that type. `[]` assigns none. The UI makes this distinction explicit. A single Bot ID remains a supported `skillsScope`. Disabling synchronization, deselecting a resource or narrowing the target roster revokes plugin-owned entries even with `prune: false`. Scope changes migrate owned definitions; user-owned collisions are retained and reported.
+
+Assignments manage this plugin's resources. Other global Ducoro resources continue to follow Ducoro's inheritance rules; an empty assignment does not mask them.
+
+### Unified diagnostics
+
+Each synchronization writes `<Magpie config>/ducoro-bridge/sync-status.json`, covering the connection, Bot models, MCP, skills, instructions and subagents with statuses, affected Bots and next actions. `DUCORO_BRIDGE_STATE_DIR` overrides the directory.
+
+From this plugin folder:
+
+```sh
+npm run diagnostics
+npm run diagnostics -- --json
+npm run diagnostics -- --doctor
+node diagnostics-cli.mjs --json > /tmp/ducoro-sync-status.json
+```
+
+The command is read-only. `--doctor` checks the CLI and daemon without LLM requests or participant restarts. Import the JSON into the console's diagnostics view to inspect the timestamped snapshot. Magpie's public page API cannot read local reports, so the console does not claim live status or store diagnostics in plugin options. Missing, stale, partial and unchecked results remain explicit. Configured means configuration-level evidence; running-session loading remains unknown.
+
+| New / extended option | Default | Meaning |
+| --- | --- | --- |
+| `mcpScope` | `global` | `global` or `agents`. |
+| `skillsScope` | `global` | `global`, `agents` or one Bot ID. |
+| `resourceAssignments` | `{}` | Bot ID → MCP / skill name lists; omitted inherits, empty assigns none. |
+
+Invalid settings stop synchronization and identify fields to correct instead of treating malformed selections as unrestricted inheritance.
+
 ## Model synchronization
 
 *Added in 0.3.1.*
