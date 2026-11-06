@@ -2,6 +2,10 @@
 
 ## 0.3.4 — 2026-11-06
 
+0.3.4 带来全新的可视化配置页面，将模型、连接器与技能集中管理，并自动列出 Bot，支持全局同步或按 Bot 单独分配。模型可跟随 Magpie 默认设置，也可为指定 Bot 固定选择；连接器同时支持 Magpie 资源库与 Ducoro 账户来源，账户工具按 Bot 显式授权，撤销分配时恢复原有策略。新版还提供统一同步诊断、失败重试及配置校验，刷新页面时保留未保存的选择，让配置与排查更方便。
+
+Version 0.3.4 introduces a new visual configuration page that brings models, connectors, and skills together, automatically lists your Bots, and supports global synchronization or individual Bot assignments. Models can follow the Magpie default or stay pinned to a specific choice. Connectors support both the Magpie library and Ducoro accounts, with explicit per-Bot permissions for account tools and restoration of previous policies when assignments are removed. Unified sync diagnostics, retries, configuration validation, and preservation of unsaved selections during refresh make setup and troubleshooting easier.
+
 - 实机修复：允许 Magpie 桌面端页面来源，解决服务页面空白；增加回归断言。
 - 实机修复：账户分配优先显示已连接服务，未连接状态给出明确提示；加载期间锁定新生成的资源控件。
 - 实机验证：真实 Bot 模型切换、连接器与技能分配、撤销和恢复通过，已恢复测试前模型及全局同步方式。
@@ -18,13 +22,9 @@
 
 ## 0.3.2 — 2026-11-06
 
-**中文**
+0.3.2 新增可视化控制台，可直接管理同步选项、目标 Bot 和模型能力映射，并按 Bot 分配 MCP 与技能。统一诊断报告与只读诊断命令帮助查看同步状态、失败原因和处理建议，控制台支持导入报告快照。新版延续 0.3.1 的模型同步能力，默认保留全局资源同步，并加强配置校验与作用域迁移处理。
 
-magpie-ducoro 0.3.2 新增可视化控制台，可直接管理同步选项、目标 Bot 和模型能力映射，并按 Bot 分配 MCP 与技能。统一诊断报告与只读诊断命令帮助查看同步状态、失败原因和处理建议，控制台支持导入报告快照。新版延续 0.3.1 的模型同步能力，默认保留全局资源同步，并加强配置校验与作用域迁移处理。
-
-**English**
-
-magpie-ducoro 0.3.2 introduces a visual console for managing sync settings, target Bots and model capability mappings, with per-Bot MCP and skill assignment. Unified reports and a read-only diagnostics command make sync status, failures and next steps easier to inspect; report snapshots can be imported into the console. This release retains 0.3.1 model synchronization and global resource sync by default, while strengthening configuration validation and scope migration handling.
+Version 0.3.2 introduces a visual console for managing sync settings, target Bots and model capability mappings, with per-Bot MCP and skill assignment. Unified reports and a read-only diagnostics command make sync status, failures and next steps easier to inspect; report snapshots can be imported into the console. This release retains 0.3.1 model synchronization and global resource sync by default, while strengthening configuration validation and scope migration handling.
 
 - 新增 Magpie 内的 Ducoro 可视化配置页面、设置面板和 Agent 菜单诊断入口。
 - 新增统一同步报告及只读诊断命令，分别呈现配置状态、失败原因、目标 Bot 和后续操作；运行时加载状态保持明确未知。
@@ -36,12 +36,14 @@ magpie-ducoro 0.3.2 introduces a visual console for managing sync settings, targ
 
 ## 0.3.1 — 2026-11-06
 
-新增模型与路由组的自动同步和官方能力映射：保持 Magpie 原有的模型选择与路由方式，
+0.3.1 新增模型与路由组的自动同步和官方能力映射：保持 Magpie 原有的模型选择与路由方式，
 为每个单模型和路由组分别识别模型身份，优先使用 z.ai、Kimi Coding 等官方目录条目
 填充 Ducoro 的“这个模型类似哪一款？”。切换默认模型时，关联 Bot 会自动跟随，
 并修复失效的旧模型 ID；支持的思考档位会保留。对于混合模型组、未知版本和已知能力
 超限，插件提供原因、候选及能力差异报告，避免错误匹配。同时支持手动指定或禁用
 映射、组成员变化监听、失败重试及重启恢复。
+
+Version 0.3.1 adds automatic model sync and official capability mapping for models and route groups: it keeps Magpie's existing model selection and routing, identifies the model identity of each single model and route group, and prefers official catalog entries such as z.ai and Kimi Coding to fill Ducoro's "which model is this like?" reference. Switching the default model follows the associated Bots automatically and repairs stale model IDs; supported thinking tiers are preserved. For mixed model groups, unknown versions and known capability overruns, the plugin reports reasons, candidates and capability diffs to avoid wrong matches. It also supports manually specifying or disabling mappings, group membership change listeners, failure retry and restart recovery.
 
 验证：57 项隔离测试通过；Ducoro 实机验证了 GLM 路由组和单模型对话、旧 Bot 修复及
 官方参考保存，两次真实对话均成功，测试后已恢复原 GLM 路由组。
