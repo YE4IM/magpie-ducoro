@@ -45,8 +45,8 @@
       <div class="section-title"><div><h2>让每个 Bot 各取所需</h2><p>分配范围始终受 Magpie 资源库中勾选的内容限制。</p></div><span class="pill">按需分配</span></div>
       <section class="card">
         <div class="field-grid">
-          <label>MCP 作用域<select id="mcpScope"><option value="global">全局 · 与 0.3.1 一致</option><option value="agents">按目标 Bot 分配</option></select><small>全局定义可能被其他 Bot 使用；按 Bot 模式写入各自的资源层。</small></label>
-          <label>技能作用域<select id="skillsScope"><option value="global">全局 · 与 0.3.1 一致</option><option value="agents">按目标 Bot 分配</option><option value="custom">指定一个 Bot</option></select><small>已有单个 Bot 作用域会保留。</small></label>
+          <label>MCP 作用域<select id="mcpScope"><option value="global">全局共享</option><option value="agents">按目标 Bot 分配</option></select><small>全局定义可能被其他 Bot 使用；按 Bot 模式写入各自的资源层。</small></label>
+          <label>技能作用域<select id="skillsScope"><option value="global">全局共享</option><option value="agents">按目标 Bot 分配</option><option value="custom">指定一个 Bot</option></select><small>已有单个 Bot 作用域会保留。</small></label>
         </div>
         <label id="custom-scope-field" hidden>技能所属 Bot ID<input id="customSkillsScope" spellcheck="false" placeholder="agt-…"></label>
         <div class="info-box">按 Bot 模式下，未单独配置的 Bot 继承所有已勾选资源。自定义列表留空表示不分配该类资源。全局模式下，下方分配规则暂不生效。</div>

@@ -98,7 +98,6 @@
     "README.zh-CN.md"
   ],
   "scripts": {
-    "test": "node --test",
     "diagnostics": "node diagnostics-cli.mjs"
   },
   "bin": {
