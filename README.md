@@ -18,9 +18,6 @@ In the app: Plugins → Add plugin → enter `github:YE4IM/magpie-ducoro`.
 magpie plugin add ./magpie-ducoro-0.3.1.tgz
 ```
 
-`magpie-ducoro-0.3.1.tgz` 是安装包；`magpie-ducoro-0.3.1-source.zip` 是包含测试和
-实机记录的源码包。新功能总结见 [CHANGELOG](CHANGELOG.md)。
-
 ## How it works
 
 - `ducoro.agent.js` declares a **Ducoro** agent row on magpie's Agent page. When the row is connected and a model is picked, magpie writes the gateway URL, the per-agent gateway key and the selected model to `~/.ducoro/magpie-agent.json`, plus the library's MCP servers to `~/.ducoro/magpie-mcp.json` and library skills to `~/.ducoro/magpie-skills/`.
