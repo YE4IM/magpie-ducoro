@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 export const FEATURES = ['connection', 'models', 'mcp', 'skills', 'instructions', 'subagents']
 const STATUSES = new Set(['configured', 'pending', 'disabled', 'skipped', 'unknown'])
 const SKIP_REASONS = new Set(['not-selected', 'superseded', 'disconnected', 'preview'])
-const REVOCATION_ERRORS = new Set(['mcp-sync', 'skill-cleanup', 'skill-restore', 'instruction-pending', 'subagent-pending', 'total-sync'])
+const REVOCATION_ERRORS = new Set(['mcp-sync', 'account-connectors', 'skill-cleanup', 'skill-restore', 'instruction-pending', 'subagent-pending', 'total-sync'])
 const ids = value => [...new Set((Array.isArray(value) ? value : []).filter(x => typeof x === 'string' && /^agt-[A-Za-z0-9-]{1,120}$/.test(x)))].sort()
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined
 const object = value => value && typeof value === 'object' && !Array.isArray(value)
@@ -17,14 +17,15 @@ const validRoundId = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9
 const OPTIONS = { connection: 'syncConnection', models: 'syncAgentModels', mcp: 'syncMcp', skills: 'syncSkills', instructions: 'syncInstructions', subagents: 'syncSubagents' }
 
 const REASONS = {
+  'account-connectors': ['mcp', '部分账户连接器尚未完成配备。', '检查账户连接状态、Bot 支持情况及允许工具，然后重试。'],
   'gateway-sync': ['connection', '连接同步未完成。', '检查 Ducoro 是否可用及 Magpie 连接设置，然后等待重试。'],
   'gateway-unreadable': ['connection', 'Magpie 连接导出暂时缺失或不完整。', '在 Magpie 中确认 Ducoro 已连接，并重新同步。'],
   'gateway-model-catalog': ['connection', '所选模型不在完整的导出列表中。', '刷新 Magpie 模型列表并确认默认模型仍可用。'],
   'bot-model-sync': ['models', '部分 Bot 的模型设置未通过校验。', '检查目标 Bot 与连接的模型能力设置，完成后等待重试。'],
   'model-metadata': ['models', '模型或路由组元数据暂时不可读。', '检查 Magpie 供应商及路由组配置，恢复后会自动重试。'],
-  'mcp-sync': ['mcp', '部分 MCP 配置未完成同步。', '检查 MCP 定义、工具限制和 Ducoro 可用性，然后等待重试。'],
-  'mcp-conflict': ['mcp', 'MCP 目标已有用户配置，插件保留原内容。', '检查同名 MCP，保留本地配置或调整目标与名称后重新同步。'],
-  'mcp-probe': ['mcp', 'MCP 可用性探测未通过。', '检查该 MCP 的依赖、授权及服务状态；配置保存不代表工具可用。'],
+  'mcp-sync': ['mcp', '部分 连接器 配置未完成同步。', '检查 连接器 定义、工具限制和 Ducoro 可用性，然后等待重试。'],
+  'mcp-conflict': ['mcp', '连接器 目标已有用户配置，插件保留原内容。', '检查同名 连接器，保留本地配置或调整目标与名称后重新同步。'],
+  'mcp-probe': ['mcp', '连接器 可用性探测未通过。', '检查该 连接器 的依赖、授权及服务状态；配置保存不代表工具可用。'],
   'skill-list': ['skills', '无法读取目标作用域的技能列表。', '检查 Ducoro 和目标 Bot 是否可用，然后等待重试。'],
   'skill-source': ['skills', '部分选中技能的源文件不可读或无效。', '检查 Magpie 资源库中的技能目录与 SKILL.md。'],
   'skill-cleanup': ['skills', '旧技能的撤销尚未完成。', '检查目标技能作用域及权限，然后等待重试。'],
@@ -52,7 +53,7 @@ const REASONS = {
   'instruction-pending': ['instructions', '指令尚未完成配置。', '检查 Magpie 指令导出及目标 Bot 的 Profile。'],
   'subagent-pending': ['subagents', '部分子代理尚未完成配置。', '检查显式选择、定义字段及本地 Ducoro 守护进程。'],
   'targets-empty': [['instructions', 'subagents'], '没有可用的目标 Bot。', '将 Bot 绑定到 Magpie 连接，或填写目标 Bot ID。'],
-  'report-missing': [FEATURES, '尚无统一同步报告。', '启动 0.3.2 插件并等待完成一次同步。'],
+  'report-missing': [FEATURES, '尚无统一同步报告。', '启动 0.3.4 插件并等待完成一次同步。'],
   'report-invalid': [FEATURES, '同步报告不可读或格式无效。', '启动插件重新同步以生成报告。'],
   'diagnostics-issue': [FEATURES, '同步需要进一步检查。', '查看插件日志并重新同步。'],
 }
@@ -101,7 +102,7 @@ function summarize(report) {
 }
 
 export function buildDiagnostics({ options = {}, reason, stages = {}, retries = [], state = {}, total, capabilities, startedAt, roundId, now = new Date() } = {}) {
-  const report = { schemaVersion: 1, pluginVersion: '0.3.2', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.3.4', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(roundId)) report.roundId = roundId
   for (const feature of FEATURES) {
     report.features[feature] = safeFeature(stages[feature])
@@ -167,7 +168,7 @@ function safeReason(reason) {
 // never become part of a support export or the CLI's output.
 export function sanitizeDiagnostics(input) {
   if (!object(input) || input.schemaVersion !== 1 || !object(input.features) || !timestamp(input.updatedAt)) return null
-  const report = { schemaVersion: 1, pluginVersion: '0.3.2', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.3.4', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(input.roundId)) report.roundId = input.roundId
   for (const feature of FEATURES) report.features[feature] = safeFeature(input.features[feature])
   for (const feature of FEATURES) {

@@ -3,16 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Ducoro 控制台</title>
+  <title>Ducoro</title>
   <link rel="stylesheet" href="style.css">
-  <script src="_magpie/bridge.js"></script>
+  <!--SERVICE_TOKEN-->
+  <script src="service-bridge.js"></script>
   <script src="model.js" defer></script>
+  <script src="resources.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <main class="console">
     <header class="hero">
-      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><span class="eyebrow">MAGPIE × DUCORO</span><h1>Ducoro 控制台 <span class="version">0.3.2</span></h1></div></div>
+      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro</h1></div></div>
       <p>在一处管理连接、同步范围和每个 Bot 的资源。</p>
       <div class="connection-note"><span class="dot" aria-hidden="true"></span><span id="connection-state">正在读取插件配置…</span></div>
     </header>
@@ -31,7 +33,6 @@
           <label>连接标识<input id="connectionSlug" autocomplete="off" spellcheck="false" placeholder="magpie-ducoro"><small>已有连接请保持原标识，避免另建连接。</small></label>
           <label>断开连接后<select id="onDisconnect"><option value="keep">保留网关连接</option><option value="remove">移除插件拥有的网关连接</option></select><small>资源分配随资源库勾选和目标范围单独同步。</small></label>
         </div>
-        <label>目标 Bot ID<textarea id="targetAgents" rows="2" spellcheck="false" placeholder="留空：自动选择绑定本连接的 Bot"></textarea><small>每行一个或用逗号分隔。页面无法读取 Bot 列表，请从 Ducoro 复制真实 ID。</small></label>
         <label>选择的子代理名称<textarea id="subagentNames" rows="2" spellcheck="false" placeholder="reviewer&#10;researcher"></textarea><small>仅同步显式选择的子代理；现有模型与工具限制仍适用。</small></label>
       </section>
       <section class="card">
@@ -42,23 +43,25 @@
       </section>
     </section>
     <section id="resources" class="tab-content" hidden>
-      <div class="section-title"><div><h2>让每个 Bot 各取所需</h2><p>分配范围始终受 Magpie 资源库中勾选的内容限制。</p></div><span class="pill">按需分配</span></div>
+      <div class="section-title"><div><h2>让每个 Bot 各取所需</h2><p>选择同步方式，再为各个 Bot 分配模型、连接器和技能。</p></div><span class="pill">按需分配</span></div>
       <section class="card">
-        <div class="field-grid">
-          <label>MCP 作用域<select id="mcpScope"><option value="global">全局共享</option><option value="agents">按目标 Bot 分配</option></select><small>全局定义可能被其他 Bot 使用；按 Bot 模式写入各自的资源层。</small></label>
-          <label>技能作用域<select id="skillsScope"><option value="global">全局共享</option><option value="agents">按目标 Bot 分配</option><option value="custom">指定一个 Bot</option></select><small>已有单个 Bot 作用域会保留。</small></label>
+        <div class="resource-grid scope-grid">
+          <label>模型作用域<select id="modelScope"><option value="global">全局同步</option><option value="agents">按 Bot 分配</option></select><small>全局模式跟随 Magpie 所选模型。</small></label>
+          <label>连接器作用域<select id="mcpScope"><option value="global">全局同步</option><option value="agents">按 Bot 分配</option></select><small>适用于 Magpie 来源；Ducoro 账户连接器始终按 Bot 配备。</small></label>
+          <label>技能作用域<select id="skillsScope"><option value="global">全局同步</option><option value="agents">按 Bot 分配</option></select><small>全局同步或为每个 Bot 单独选择技能。</small></label>
         </div>
-        <label id="custom-scope-field" hidden>技能所属 Bot ID<input id="customSkillsScope" spellcheck="false" placeholder="agt-…"></label>
-        <div class="info-box">按 Bot 模式下，未单独配置的 Bot 继承所有已勾选资源。自定义列表留空表示不分配该类资源。全局模式下，下方分配规则暂不生效。</div>
+        <div class="info-box">单独分配可选择继承、指定资源或不分配。本页仅撤销插件管理的分配，其他全局资源和用户自行配置的资源仍可能生效。</div>
       </section>
       <section class="card">
-        <div class="card-heading"><div><h2>单独设置 Bot</h2><p>使用资源库中的名称，不使用生成的 MCP 标识。</p></div><button type="button" id="add-assignment" class="secondary">＋ 添加 Bot</button></div>
+        <div class="card-heading"><div><h2>Bot 列表</h2><p id="inventory-state">正在读取 Ducoro Bot 和资源…</p></div><button type="button" id="refresh-bots" class="secondary">刷新列表</button></div>
+        <div id="inventory-message" class="notice" role="status" hidden></div>
         <div id="assignments" class="rows"></div>
-        <div id="assignment-empty" class="empty-state"><span class="empty-icon" aria-hidden="true">◇</span><h3>所有目标 Bot 继承资源库选择</h3><p>添加 Bot 后，可分别指定它的 MCP 和技能。</p></div>
+        <div id="assignment-empty" class="empty-state" hidden><span class="empty-icon" aria-hidden="true">◇</span><h3>尚无 Bot</h3><p>在 Ducoro 中创建 Bot 后刷新列表。</p></div>
       </section>
     </section>
     <section id="diagnostics" class="tab-content" hidden>
-      <div class="section-title"><div><h2>同步结果，一目了然</h2><p>导入插件生成的诊断报告，查看各项状态与处理建议。</p></div><span class="pill">报告快照</span></div>
+      <div class="section-title"><div><h2>同步结果，一目了然</h2><p>查看最近同步结果、重试同步，或导入历史诊断报告。</p></div><span class="pill">报告快照</span></div>
+      <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>读取最近一轮报告，或重新执行同步。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">刷新报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
       <section class="card import-card">
         <div><h2>导入诊断报告</h2><p>在插件目录运行下方命令，再选择生成的 JSON 文件。文件仅在当前页面读取。</p><code id="diagnostic-command">node diagnostics-cli.mjs --json &gt; ducoro-status.json</code></div>
         <label class="file-button">选择报告文件<input id="report-file" type="file" accept=".json,application/json"></label>
@@ -66,7 +69,7 @@
       <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
       <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>尚未导入报告</h3><p>诊断报告会显示最近记录的同步结果与处理建议。</p><p class="muted">报告在导入时更新。重新导入最新报告即可查看近期状态。</p></section>
       <section id="report-view" hidden>
-        <div class="report-meta"><span id="report-time"></span><span class="pill">导入快照 · 非实时</span></div>
+        <div class="report-meta"><span id="report-time"></span><span class="pill">报告快照 · 非实时</span></div>
         <div id="report-cards" class="report-grid"></div>
         <section class="card"><h2>需要关注</h2><div id="report-issues"></div></section>
         <p class="footnote">报告说明配置层的同步情况。除非报告明确验证，否则不代表运行中的会话已加载新的工具、技能或子代理。</p>

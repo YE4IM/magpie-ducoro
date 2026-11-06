@@ -45,7 +45,6 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
     if (models.length && !models.includes(target)) throw Error('selected model is absent from the saved connection catalog')
     const state = getState()
     const migration = state.modelMigration?.slug === slug && state.modelMigration.target === target ? state.modelMigration : null
-    const following = new Set(migration?.from ?? [])
     const all = rows(await call(['agent', 'list']))
     if (!Array.isArray(all)) throw Error('unrecognized Ducoro Bot list response')
     const eligible = bot => bot?.modelPreference?.connectionSlug === slug && bot.modelPreference.runtime === 'pi-agent'
@@ -73,8 +72,8 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
         if (current?.id !== bot.id) throw Error('unrecognized Ducoro Bot record')
         if (!eligible(current)) continue
         const preference = current.modelPreference
-        const removed = models.length > 0 && !models.includes(preference.model)
-        const model = removed || following.has(preference.model) ? target : preference.model
+        const model = opts.modelScope === 'agents' ? (opts.botModels?.[bot.id] ?? target) : target
+        if (models.length && !models.includes(model)) throw Error('assigned model unavailable; existing preference retained')
         const info = infos.find(info => info.id === model)
         if (!info) throw Error('effective model capabilities unavailable; Bot sync deferred')
         const next = compatiblePreference(preference, model, info)

@@ -1,6 +1,6 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "description": "Connect Ducoro to Magpie with visual settings, unified diagnostics and per-Bot resource assignment.",
   "type": "module",
   "main": "./bridge.mjs",
@@ -19,7 +19,7 @@
     "agent": "./ducoro.agent.js",
     "summary": {
       "en": "Connect Ducoro to Magpie models with visual settings, unified diagnostics and per-Bot MCP and skill assignment.",
-      "zh": "让 Ducoro 使用 Magpie 模型，提供可视化配置、统一诊断和按 Bot 分配 MCP 与技能。"
+      "zh": "让 Ducoro 使用 Magpie 模型，提供可视化配置、同步诊断和按 Bot 分配模型、连接器与技能。"
     },
     "options": {
       "connectionSlug": "magpie-ducoro",
@@ -52,25 +52,23 @@
         "alibaba-cn"
       ],
       "mcpScope": "global",
-      "resourceAssignments": {}
+      "resourceAssignments": {},
+      "modelScope": "global",
+      "botModels": {},
+      "accountConnectors": {},
+      "servicePort": 3487
     },
     "page": {
       "title": "Ducoro",
-      "file": "ui/index.html",
+      "file": "ui/launch.html",
       "titles": {
-        "zh": "Ducoro 控制台"
+        "zh": "Ducoro"
+      },
+      "service": {
+        "port": 3487,
+        "option": "servicePort"
       }
     },
-    "panels": [
-      {
-        "slot": "settings",
-        "file": "ui/panel.html",
-        "title": "Ducoro sync",
-        "titles": {
-          "zh": "Ducoro 同步"
-        }
-      }
-    ],
     "actions": [
       {
         "id": "diagnostics",
@@ -78,6 +76,16 @@
         "title": "Ducoro diagnostics",
         "titles": {
           "zh": "Ducoro 同步诊断"
+        }
+      }
+    ],
+    "panels": [
+      {
+        "slot": "settings",
+        "file": "ui/panel.html",
+        "title": "Ducoro",
+        "titles": {
+          "zh": "Ducoro"
         }
       }
     ]
@@ -95,7 +103,9 @@
     "diagnostics-cli.mjs",
     "ui/",
     "resource-scopes.mjs",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "page-service.mjs",
+    "account-connectors.mjs"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs"

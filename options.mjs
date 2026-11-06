@@ -28,6 +28,18 @@ export function validateOptions(options) {
     if (!record(options.modelCapabilityRefs)) fail('modelCapabilityRefs', 'object-required')
     else if (Object.entries(options.modelCapabilityRefs).some(([key, value]) => !nonempty(key) || (value !== null && (!nonempty(value) || !/^[^,=\s]+\/[^,=\s]+$/.test(value))))) fail('modelCapabilityRefs', 'reference-invalid')
   }
+  if (options.servicePort !== undefined && (!Number.isInteger(options.servicePort) || options.servicePort < 1024 || options.servicePort > 65535)) fail('servicePort', 'port-invalid')
+  if (options.modelScope !== undefined && !['global', 'agents'].includes(options.modelScope)) fail('modelScope', 'scope-invalid')
+  if (options.botModels !== undefined && (!record(options.botModels) || Object.entries(options.botModels).some(([id, model]) => !botId(id) || !nonempty(model)))) fail('botModels', 'model-assignment-invalid')
+  if (options.accountConnectors !== undefined) {
+    if (!record(options.accountConnectors)) fail('accountConnectors', 'object-required')
+    else for (const [id, toolkits] of Object.entries(options.accountConnectors)) {
+      if (!botId(id) || !record(toolkits)) { fail('accountConnectors', 'assignment-invalid'); continue }
+      for (const [slug, policy] of Object.entries(toolkits)) {
+        if (['__proto__','constructor','prototype'].includes(slug) || !/^[a-zA-Z0-9_-]+$/.test(slug) || !record(policy) || Object.keys(policy).some(k => !['allow','deny'].includes(k)) || !names(policy.allow) || !policy.allow.length || !names(policy.deny ?? []) || [...policy.allow,...(policy.deny ?? [])].some(tool => !/^[A-Za-z0-9_.:-]+$/.test(tool))) fail('accountConnectors', 'policy-invalid')
+      }
+    }
+  }
   if (options.resourceAssignments !== undefined) {
     if (!record(options.resourceAssignments)) fail('resourceAssignments', 'object-required')
     else for (const [id, assignment] of Object.entries(options.resourceAssignments)) {

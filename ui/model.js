@@ -5,7 +5,7 @@
 const SWITCHES = [
   ['syncConnection', '网关连接', '同步连接地址、密钥与模型目录'],
   ['syncAgentModels', 'Bot 模型跟随', '更新绑定 Bot，修复失效模型 ID'],
-  ['syncMcp', 'MCP 工具', '同步资源库中勾选的服务器'],
+  ['syncMcp', '连接器', '同步资源库连接器与 Bot 账户工具配备'],
   ['syncSkills', '技能', '同步完整技能包与附属文件'],
   ['syncInstructions', '指令', '同步到目标 Bot 的指令区块'],
   ['syncSubagents', '子代理', '同步显式选择的角色定义'],
@@ -14,6 +14,7 @@ const DEFAULT_OPTIONS = {
   connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
   syncMcp: true, syncSkills: true, syncInstructions: true, syncSubagents: true,
   prune: true, onDisconnect: 'keep', targetAgents: [], subagentNames: [],
+  modelScope: 'global', botModels: {}, accountConnectors: {},
   mcpScope: 'global', skillsScope: 'global', resourceAssignments: {},
   modelCapabilityRefs: {}, officialProviders: [
     'zai', 'zai-coding-cn', 'kimi-coding', 'moonshotai', 'moonshotai-cn',
@@ -37,7 +38,8 @@ function validateFields(value) {
   for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw Error(`${key} 必须是开关值。`)
   if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw Error('连接标识仅支持小写字母、数字和短横线。')
   if (!['keep', 'remove'].includes(value.onDisconnect)) throw Error('请选择有效的断开连接处理方式。')
-  if (!['global', 'agents'].includes(value.mcpScope)) throw Error('请选择有效的 MCP 作用域。')
+  if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw Error('模型或连接器分配格式无效。')
+  if (!['global', 'agents'].includes(value.mcpScope)) throw Error('请选择有效的 连接器 作用域。')
   if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw Error('技能作用域需要一个有效的 Bot ID。')
   for (const key of ['targetAgents', 'subagentNames', 'officialProviders']) {
     if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw Error(`${key} 需要名称列表。`)
@@ -53,7 +55,7 @@ function validateFields(value) {
   if (!isRecord(value.resourceAssignments)) throw Error('Bot 资源分配需要对象。')
   for (const [id, assignment] of Object.entries(value.resourceAssignments)) {
     if (!botId(id)) throw Error('资源分配中的 Bot ID 格式应为 agt-…。')
-    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw Error('Bot 资源分配仅支持 MCP 和技能。')
+    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw Error('Bot 资源分配仅支持 连接器 和技能。')
     for (const key of ['mcp', 'skills']) if (Object.hasOwn(assignment, key)) {
       if (!Array.isArray(assignment[key]) || assignment[key].length > 256 || !assignment[key].every(s => typeof s === 'string' && s.trim() && !/[,\r\n]/.test(s))) throw Error('自定义资源请填写资源库名称列表，留空代表不分配。')
     }
@@ -74,13 +76,13 @@ function mergeEditedOptions(rawCurrent, baseline, edited, keys = EDITABLE_KEYS) 
   return { options: { ...rawCurrent, ...Object.fromEntries(changed.map(key => [key, edited[key]])) }, changed }
 }
 
-const FEATURE_NAMES = { connection: '网关连接', models: '模型与能力', mcp: 'MCP 工具', skills: '技能', instructions: '指令', subagents: '子代理' }
+const FEATURE_NAMES = { connection: '网关连接', models: '模型与能力', mcp: '连接器', skills: '技能', instructions: '指令', subagents: '子代理' }
 const STATUS_NAMES = { configured: '配置已同步', pending: '等待处理', disabled: '已关闭', skipped: '已跳过', unknown: '尚未确认' }
 const safeText = (value, fallback = '') => typeof value === 'string' ? value.slice(0, 2000) : fallback
 const stringList = value => Array.isArray(value) ? value.filter(x => typeof x === 'string').slice(0, 256).map(x => x.slice(0, 200)) : []
 
 function parseDiagnosticReport(raw) {
-  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error('这不是受支持的 Ducoro 诊断报告。请选择 0.3.2 生成的 sync-status.json 或诊断导出文件。')
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error('这不是受支持的 Ducoro 诊断报告。请选择 0.3.4 生成的 sync-status.json 或诊断导出文件。')
   const issues = Array.isArray(raw.issues) ? raw.issues : []
   const cleanIssue = issue => ({ feature: safeText(issue.feature), code: safeText(issue.code), message: safeText(issue.message, '需要进一步检查'), nextAction: safeText(issue.nextAction), targets: stringList(issue.targets) })
   return {

@@ -66,47 +66,9 @@ function addReference(route = '', reference = '') {
   updateEmptyRows()
 }
 
-function addAssignment(id = '', assignment = {}) {
-  const row = node('section', undefined, 'assignment-row')
-  const heading = node('div', undefined, 'assignment-header')
-  const idField = textField('Bot ID', id, 'agt-…', 'assignment-id')
-  const remove = node('button', '移除', 'remove-row')
-  remove.type = 'button'
-  remove.setAttribute('aria-label', '移除 Bot 分配')
-  remove.addEventListener('click', () => { row.remove(); updateEmptyRows(); dirty() })
-  heading.append(idField.label, remove)
-  const fields = node('div', undefined, 'field-grid')
-  for (const [key, title] of [['mcp', 'MCP 服务器'], ['skills', '技能']]) {
-    const label = node('label', title)
-    const select = node('select')
-    select.className = `assignment-${key}-mode`
-    for (const [value, text] of [['inherit', '继承资源库的全部勾选'], ['custom', '自定义名称列表（可为空）']]) {
-      const opt = node('option', text)
-      opt.value = value
-      select.append(opt)
-    }
-    const text = node('textarea')
-    text.rows = 2
-    text.spellcheck = false
-    text.className = `assignment-${key}-names`
-    text.placeholder = key === 'mcp' ? '例如：github, filesystem' : '例如：code-review, writing'
-    text.setAttribute('aria-label', `${title}名称列表`)
-    select.value = Object.hasOwn(assignment, key) ? 'custom' : 'inherit'
-    text.value = (assignment[key] ?? []).join('\n')
-    text.hidden = select.value === 'inherit'
-    select.addEventListener('change', () => { text.hidden = select.value === 'inherit' })
-    label.append(select, text)
-    fields.append(label)
-  }
-  row.append(heading, fields)
-  $('assignments').append(row)
-  updateEmptyRows()
-}
-
 function updateEmptyRows() {
   if (panel) return
   $('reference-empty').hidden = $('references').children.length > 0
-  $('assignment-empty').hidden = $('assignments').children.length > 0
 }
 
 function setTab(name) {
@@ -125,20 +87,15 @@ function populate(options) {
   if (!panel) {
     $('connectionSlug').value = options.connectionSlug
     $('onDisconnect').value = options.onDisconnect
-    $('targetAgents').value = options.targetAgents.join('\n')
     $('subagentNames').value = options.subagentNames.join('\n')
     $('officialProviders').value = options.officialProviders.join('\n')
-    $('mcpScope').value = options.mcpScope
-    $('skillsScope').value = ['global', 'agents'].includes(options.skillsScope) ? options.skillsScope : 'custom'
-    $('customSkillsScope').value = $('skillsScope').value === 'custom' ? options.skillsScope : ''
-    $('custom-scope-field').hidden = $('skillsScope').value !== 'custom'
+    for (const key of ['modelScope','mcpScope','skillsScope']) $(key).value = options[key]
+    DucoroResources.set(options)
     $('references').replaceChildren()
-    $('assignments').replaceChildren()
     for (const [route, ref] of Object.entries(options.modelCapabilityRefs)) addReference(route, ref)
-    for (const [id, assignment] of Object.entries(options.resourceAssignments)) addAssignment(id, assignment)
     updateEmptyRows()
   }
-  $('connection-state').textContent = `连接标识：${options.connectionSlug} · 配置已读取，同步结果请查看诊断报告`
+  $('connection-state').textContent = `连接标识：${options.connectionSlug} · 设置已读取，同步结果请查看同步诊断`
 }
 
 function collect() {
@@ -147,11 +104,9 @@ function collect() {
   if (panel) return options
   options.connectionSlug = $('connectionSlug').value.trim()
   options.onDisconnect = $('onDisconnect').value
-  options.targetAgents = splitList($('targetAgents').value)
   options.subagentNames = splitList($('subagentNames').value)
   options.officialProviders = splitList($('officialProviders').value)
-  options.mcpScope = $('mcpScope').value
-  options.skillsScope = $('skillsScope').value === 'custom' ? $('customSkillsScope').value.trim() : $('skillsScope').value
+  for (const key of ['modelScope','mcpScope','skillsScope']) options[key] = $(key).value
   options.modelCapabilityRefs = {}
   for (const row of $('references').children) {
     const route = row.querySelector('.ref-route').value.trim()
@@ -159,14 +114,7 @@ function collect() {
     if (Object.hasOwn(options.modelCapabilityRefs, route)) throw Error(`模型 ${route || '（空名称）'} 重复，请仅保留一条映射。`)
     Object.defineProperty(options.modelCapabilityRefs, route, { value: ref, enumerable: true, configurable: true, writable: true })
   }
-  options.resourceAssignments = {}
-  for (const row of $('assignments').children) {
-    const id = row.querySelector('.assignment-id').value.trim()
-    if (Object.hasOwn(options.resourceAssignments, id)) throw Error(`Bot ${id || '（空 ID）'} 重复，请合并为一项。`)
-    const assignment = {}
-    for (const key of ['mcp', 'skills']) if (row.querySelector(`.assignment-${key}-mode`).value === 'custom') assignment[key] = splitList(row.querySelector(`.assignment-${key}-names`).value)
-    Object.defineProperty(options.resourceAssignments, id, { value: assignment, enumerable: true, configurable: true, writable: true })
-  }
+  Object.assign(options, DucoroResources.collect())
   return options
 }
 
@@ -183,9 +131,11 @@ function dirty() {
 
 function setBusy(value) {
   busy = value
+  document.body.dataset.busy = String(value)
   for (const el of document.querySelectorAll('input:not([type="file"]),textarea,select,button:not([data-tab])')) el.disabled = value || !ready
   if (!value && ready) {
     for (const row of document.querySelectorAll('.reference-row')) row.querySelector('.ref-value').disabled = row.querySelector('.ref-disabled').checked
+    for (const el of document.querySelectorAll('[data-locked="true"]')) el.disabled = true
     dirty()
   }
 }
@@ -198,6 +148,7 @@ async function load() {
     populate(baseline)
     ready = true
     message('')
+    if (!panel) { await DucoroResources.refresh(); await refreshReport() }
   } catch (error) {
     message(`无法读取设置：${error.message}`, true)
     $('connection-state').textContent = '配置尚未读取，未执行任何修改'
@@ -215,10 +166,12 @@ async function save() {
     const current = await globalThis.magpie.options.get() ?? {}
     const { options, changed } = mergeEditedOptions(current, baseline, edited, panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS)
     if (!changed.length) { message('没有需要保存的修改。'); return }
+    if (!panel) await ducoroApi('validate',options)
     const saved = await globalThis.magpie.options.set(options)
     baseline = optionsForDisplay(saved ?? options)
     populate(baseline)
-    message('设置已保存。插件将重新加载并执行同步；请用新的诊断报告确认结果。')
+    message('设置已保存，正在同步。稍后刷新报告可查看结果。')
+    if (!panel) setTimeout(async () => { await DucoroResources.refresh(); await refreshReport() }, 3000)
   } catch (error) {
     message(error.message || '保存失败，请重试。', true)
   } finally { setBusy(false) }
@@ -251,7 +204,12 @@ function showReport(report) {
     if (issue.targets.length) el.append(node('p', `受影响 Bot：${issue.targets.join('、')}`))
     $('report-issues').append(el)
   }
-  message(`已读取诊断报告${report.pluginVersion ? `（${report.pluginVersion}）` : ''}。此快照不会自动更新，也不会写入插件选项。`, false, 'report-message')
+  message(`已读取诊断报告${report.pluginVersion ? `（${report.pluginVersion}）` : ''}。可点击刷新报告读取最新结果。`, false, 'report-message')
+}
+
+async function refreshReport() {
+  try { const report = await ducoroApi('report'); if (!report) throw Error('尚无同步报告，请等待插件完成同步后刷新。'); showReport(parseDiagnosticReport(report)) }
+  catch(error) { message(error.message,true,'report-message') }
 }
 
 async function importReport(event) {
@@ -275,13 +233,15 @@ $('reload').addEventListener('click', () => {
 if (!panel) {
   for (const tab of document.querySelectorAll('[data-tab]')) tab.addEventListener('click', () => setTab(tab.dataset.tab))
   $('add-reference').addEventListener('click', () => { addReference(); dirty() })
-  $('add-assignment').addEventListener('click', () => { addAssignment(); dirty() })
-  $('skillsScope').addEventListener('change', () => { $('custom-scope-field').hidden = $('skillsScope').value !== 'custom' })
+  $('refresh-bots').addEventListener('click', () => DucoroResources.refresh())
+  for (const key of ['modelScope','mcpScope','skillsScope']) $(key).addEventListener('change', () => { DucoroResources.scopes({[key]:$(key).value}); dirty() })
+  $('refresh-report').addEventListener('click',refreshReport)
+  $('retry-sync').addEventListener('click',async () => { try { await ducoroApi('retry',{}); message('已请求重新同步，请稍后刷新报告。',false,'report-message') } catch(error) { message(error.message,true,'report-message') } })
   $('report-file').addEventListener('change', importReport)
 }
 
 if (!globalThis.magpie?.ready || !globalThis.magpie?.options) {
-  message('请从 Magpie 中打开 Ducoro 控制台，以读取和保存插件设置。', true)
+  message('请从 Magpie 中打开 Ducoro，以读取和保存插件设置。', true)
   $('connection-state').textContent = '尚未连接 Magpie 页面接口'
   $('dirty-state').textContent = '未读取配置'
 } else {

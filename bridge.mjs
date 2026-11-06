@@ -23,6 +23,8 @@
 //
 // This file must export exactly one plugin function (plus _internal helpers).
 
+import { createPageService } from "./page-service.mjs"
+import { syncAccountConnectors } from "./account-connectors.mjs"
 import { spawn as nodeSpawn } from "node:child_process"
 import { watch as fsWatch } from "node:fs"
 import {
@@ -65,6 +67,10 @@ const DEFAULT_PATHS = {
 
 export const DEFAULTS = {
   cli: "ducoro-cli",
+  servicePort: 3487,
+  modelScope: "global",
+  botModels: {},
+  accountConnectors: {},
   connectionSlug: "magpie-ducoro",
   connectionName: "Magpie gateway",
   syncConnection: true,
@@ -318,6 +324,7 @@ const createEngine = (input = {}, options = {}) => {
           modelCapabilities: raw.modelCapabilities ?? null,
           mcp: raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {},
           total: raw.total,
+          accountConnectors: raw.accountConnectors ?? {},
           skills: raw.skills && typeof raw.skills === "object" ? raw.skills : {},
         }
       }
@@ -875,6 +882,7 @@ const createEngine = (input = {}, options = {}) => {
   }
 
   const pendingMcpProbes = new Map()
+  let forceMcpProbe = false
   let authorizedMcpSlugs = new Set()
   let probeDrain = null
   const drainMcpProbes = () => {
@@ -966,7 +974,7 @@ const createEngine = (input = {}, options = {}) => {
           log(`saving MCP server ${slug} (${scope}) failed (kept for retry): ${errMsg(r)}`)
           requestRetry("mcp-sync")
         }
-      } else if (layer.get(slug)?.connectionStatus !== "connected") {
+      } else if (forceMcpProbe || layer.get(slug)?.connectionStatus !== "connected") {
         pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
       }
     }
@@ -1340,6 +1348,7 @@ const createEngine = (input = {}, options = {}) => {
   }
 
   const syncAllUnlocked = async (reason = "tick") => {
+    forceMcpProbe = reason === "page-retry"
     await loadState()
     const invalidOptions = validateOptions(opts)
     if (invalidOptions.length) {
@@ -1396,6 +1405,13 @@ const createEngine = (input = {}, options = {}) => {
         log("skill sync error:", e?.message ?? e)
         requestRetry("skill-sync")
       }
+    }
+    try {
+      await syncAccountConnectors({ options: opts, state, run, save: saveState })
+    } catch (error) {
+      log("account connector synchronization pending:", error.message)
+      diagnostics.retry("account-connectors", ["mcp"])
+      requestRetry("account-connectors")
     }
     if (!stopped && (!watching || !pending)) await syncGateway(reason)
   }
@@ -1614,11 +1630,14 @@ const createEngine = (input = {}, options = {}) => {
     return refreshPromise
   }
 
+  let pageService = null
   const start = async () => {
     if (watching) return
     const generation = ++lifecycleGeneration
     stopped = false
     watching = true
+    if (!dryRun) pageService = await createPageService({ options: opts, paths, stateDir, run, trigger,
+      getReport: () => readJson(join(stateDir, "sync-status.json")), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)
@@ -1641,6 +1660,8 @@ const createEngine = (input = {}, options = {}) => {
 
   const stop = async () => {
     lifecycleGeneration++
+    await pageService?.close()
+    pageService = null
     stopped = true
     watching = false
     interruptGatewayReads()

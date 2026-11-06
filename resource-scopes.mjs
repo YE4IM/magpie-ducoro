@@ -33,7 +33,11 @@ export function planResourceScopes(opts, bots = []) {
     if (explicit.length) {
       if (explicit.some(id => !eligible.some(bot => bot.id === id))) throw Error('target Bot is missing or does not use pi-agent')
       targets = explicit
-    } else targets = eligible.filter(bot => bot.modelPreference?.connectionSlug === opts.connectionSlug).map(bot => bot.id)
+    } else {
+      const assigned = new Set(Object.keys(opts.resourceAssignments ?? {}))
+      targets = eligible.filter(bot => bot.modelPreference?.connectionSlug === opts.connectionSlug || assigned.has(bot.id)).map(bot => bot.id)
+      if ([...assigned].some(id => bots.some(bot => bot.id === id) && !eligible.some(bot => bot.id === id))) throw Error('assigned Bot is missing or unsupported')
+    }
   }
   const mcpScopes = opts.syncMcp ? (opts.mcpScope === 'agents' ? targets : ['global']) : []
   const skillScopes = opts.syncSkills ? (opts.skillsScope === 'agents' ? targets : [opts.skillsScope || 'global']) : []
