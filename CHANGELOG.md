@@ -2,13 +2,16 @@
 
 ## 0.3.4 — 2026-11-06
 
-0.3.4 带来全新的可视化配置页面，将模型、连接器与技能集中管理，并自动列出 Bot，支持全局同步或按 Bot 单独分配。模型可跟随 Magpie 默认设置，也可为指定 Bot 固定选择；连接器同时支持 Magpie 资源库与 Ducoro 账户来源，账户工具按 Bot 显式授权，撤销分配时恢复原有策略。新版还提供统一同步诊断、失败重试及配置校验，刷新页面时保留未保存的选择，让配置与排查更方便。
+0.3.4 带来全新的可视化配置页面，在一处管理模型、连接器与技能，支持全局同步和按 Bot 单独分配。模型可跟随 Magpie 默认设置或为指定 Bot 固定选择，连接器同时支持 Magpie 资源库与 Ducoro 账户来源。新版诊断报告每次查看时按需生成，无需导入文件，也不会在本机保存或累积历史报告，并清晰区分查看时间与最近同步时间。同时修复插件重载后页面连接失败的问题，完善自动重连、失败提示与配置校验，让配置和排查更加方便。
 
-Version 0.3.4 introduces a new visual configuration page that brings models, connectors, and skills together, automatically lists your Bots, and supports global synchronization or individual Bot assignments. Models can follow the Magpie default or stay pinned to a specific choice. Connectors support both the Magpie library and Ducoro accounts, with explicit per-Bot permissions for account tools and restoration of previous policies when assignments are removed. Unified sync diagnostics, retries, configuration validation, and preservation of unsaved selections during refresh make setup and troubleshooting easier.
+Version 0.3.4 introduces a new visual settings page for managing models, connectors, and skills in one place, with global synchronization and per-Bot assignments. Models can follow the Magpie default or be pinned to a specific choice, while connectors support both the Magpie library and Ducoro accounts. Diagnostic reports are generated on demand whenever viewed, with no file imports or locally saved report history, and clearly distinguish viewing time from the latest sync time. This release also fixes page connection failures after plugin reloads and improves automatic reconnection, error messages, and configuration validation.
 
-- 实机修复：允许 Magpie 桌面端页面来源，解决服务页面空白；增加回归断言。
+- 修复插件重载期间端口占用后页面服务永久失联的问题：自动等待旧宿主退出并重新绑定，读取请求短暂失败时自动重试。
+- 同步诊断改为每次查看按需生成，只在内存与页面中呈现；移除报告文件导入入口，不再写入统一、指令/子代理及模型能力诊断文件，启动时清理旧版报告。
+- 页面分别显示查看时间与最近同步时间，标明同步中和过期结果；连接失败时清空旧结果并给出中文提示。命令行诊断同步改为读取实时服务。
+
+- 实机修复：允许 Magpie 桌面端页面来源，解决服务页面空白。
 - 实机修复：账户分配优先显示已连接服务，未连接状态给出明确提示；加载期间锁定新生成的资源控件。
-- 实机验证：真实 Bot 模型切换、连接器与技能分配、撤销和恢复通过，已恢复测试前模型及全局同步方式。
 
 - 侧边栏和页面标题统一为 Ducoro；界面工具资源统一称为“连接器”。
 - 作用域及 Bot 卡片按“模型、连接器、技能”三列排列，窄屏自动纵向排列。
@@ -16,9 +19,8 @@ Version 0.3.4 introduces a new visual configuration page that brings models, con
 - 模型支持全局跟随与按 Bot 单独指定；独立模型不会被全局默认模型变化覆盖。
 - 连接器和技能以勾选列表分配；账户连接器按 Bot 指定具体允许工具。
 - 连接器撤销恢复原有用户策略，检测外部编辑，支持结果未知时再次核实。
-- 页面可刷新同步报告、重试同步，保留原有报告导入入口。
+- 页面可按需查看诊断报告或请求重试同步。
 - 使用 Magpie 正式页面消息通道保存选项，不额外维护设置副本。
-- 9 项自动测试通过；模拟浏览器检查覆盖刷新后保留选择与完整保存。
 
 ## 0.3.2 — 2026-11-06
 

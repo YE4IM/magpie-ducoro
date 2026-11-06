@@ -60,16 +60,12 @@
       </section>
     </section>
     <section id="diagnostics" class="tab-content" hidden>
-      <div class="section-title"><div><h2>同步结果，一目了然</h2><p>查看最近同步结果、重试同步，或导入历史诊断报告。</p></div><span class="pill">报告快照</span></div>
-      <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>读取最近一轮报告，或重新执行同步。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">刷新报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
-      <section class="card import-card">
-        <div><h2>导入诊断报告</h2><p>在插件目录运行下方命令，再选择生成的 JSON 文件。文件仅在当前页面读取。</p><code id="diagnostic-command">node diagnostics-cli.mjs --json &gt; ducoro-status.json</code></div>
-        <label class="file-button">选择报告文件<input id="report-file" type="file" accept=".json,application/json"></label>
-      </section>
+      <div class="section-title"><div><h2>同步结果，一目了然</h2><p>每次查看生成当前报告，或重试同步后再次查看。</p></div><span class="pill">实时诊断</span></div>
+      <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>报告按需生成，仅在当前页面显示，不保存文件或累积历史。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
       <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
-      <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>尚未导入报告</h3><p>诊断报告会显示最近记录的同步结果与处理建议。</p><p class="muted">报告在导入时更新。重新导入最新报告即可查看近期状态。</p></section>
+      <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步诊断或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
       <section id="report-view" hidden>
-        <div class="report-meta"><span id="report-time"></span><span class="pill">报告快照 · 非实时</span></div>
+        <div class="report-meta"><span id="report-time"></span><span class="pill">按需生成 · 不保存</span></div>
         <div id="report-cards" class="report-grid"></div>
         <section class="card"><h2>需要关注</h2><div id="report-issues"></div></section>
         <p class="footnote">报告说明配置层的同步情况。除非报告明确验证，否则不代表运行中的会话已加载新的工具、技能或子代理。</p>

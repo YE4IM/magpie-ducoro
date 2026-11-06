@@ -10,7 +10,7 @@ const LABELS = { connection: '连接', models: 'Bot 模型', mcp: 'MCP', skills:
 const STATUS = { configured: '配置已对账', pending: '待处理', disabled: '已关闭', skipped: '本轮未配置', unknown: '未知' }
 
 export function formatDiagnostics(report) {
-  const lines = [`Ducoro 同步诊断 · ${report.pluginVersion}`, `报告时间：${report.updatedAt || '尚无报告'}${report.stale ? '（缺失或可能已过期）' : ''}`, `整体：${STATUS[report.status] || '未知'}`, '会话加载状态：未知；保存配置不代表运行中的会话已加载。', '']
+  const lines = [`Ducoro 同步诊断 · ${report.pluginVersion}`, `查看时间：${report.updatedAt}`, `最近同步：${report.lastSyncedAt || '尚未完成同步'}${report.stale ? '（同步结果待更新）' : ''}`, '报告按需生成，不保存本地文件。', `整体：${STATUS[report.status] || '未知'}`, '会话加载状态：未知；保存配置不代表运行中的会话已加载。', '']
   for (const [feature, row] of Object.entries(report.features)) lines.push(`${LABELS[feature]}：${row.skipReason === 'not-selected' ? '未选择资源' : STATUS[row.status]}${row.count === undefined ? '' : ` · ${row.count} 项`}${row.targets.length ? ` · ${row.targets.join(', ')}` : ''}`)
   const seen = new Set()
   for (const issue of report.issues) {
@@ -48,23 +48,27 @@ export async function checkDaemon({ cli = 'ducoro-cli', timeoutMs = 5000 } = {})
 }
 
 export async function main(args = process.argv.slice(2), { output = text => process.stdout.write(text), errorOutput = text => process.stderr.write(text) } = {}) {
-  let json = false, doctor = false, stateDir = defaultStateDir(), cli = 'ducoro-cli'
+  let json = false, doctor = false, port = 3487, stateDir = defaultStateDir(), cli = 'ducoro-cli'
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--help' || arg === '-h') {
-      output('Usage: node diagnostics-cli.mjs [--json] [--state-dir <directory>] [--doctor] [--cli <path>]\nRead-only saved sync report. --doctor additionally reads ducoro-cli info; never runs an LLM or modifies configuration.\n')
+      output('Usage: node diagnostics-cli.mjs [--json] [--state-dir <directory>] [--port <port>] [--doctor] [--cli <path>]\nGenerate a read-only live report from the running plugin. No report files are saved. --doctor additionally reads ducoro-cli info; never runs an LLM or modifies configuration.\n')
       return 0
     }
     if (arg === '--json') json = true
     else if (arg === '--doctor') doctor = true
-    else if (arg === '--state-dir' || arg === '--cli') {
+    else if (arg === '--state-dir' || arg === '--cli' || arg === '--port') {
       const value = args[++i]
       if (!value || value.startsWith('--')) { errorOutput('Missing option value. Use --help.\n'); return 2 }
       if (arg === '--state-dir') stateDir = value
+      else if (arg === '--port') {
+        port = Number(value)
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) { errorOutput('Invalid service port. Use --help.\n'); return 2 }
+      }
       else cli = value
     } else { errorOutput('Unknown option. Use --help.\n'); return 2 }
   }
-  const report = await readDiagnostics({ stateDir })
+  const report = await readDiagnostics({ stateDir, port })
   if (doctor) report.doctor = await checkDaemon({ cli })
   output(json ? JSON.stringify(report, null, 2) + '\n' : formatDiagnostics(report) + '\n')
   return report.stale || report.status === 'pending' || report.status === 'unknown' || report.doctor?.status === 'unavailable' ? 2 : 0

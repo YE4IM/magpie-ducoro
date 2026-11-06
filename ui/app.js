@@ -6,6 +6,7 @@ const panel = document.body.dataset.panel === 'true'
 let baseline = null
 let ready = false
 let busy = false
+let reportRequest = 0
 const node = (tag, text, className) => {
   const el = document.createElement(tag)
   if (text !== undefined) el.textContent = text
@@ -80,6 +81,7 @@ function setTab(name) {
   }
   for (const el of document.querySelectorAll('.tab-content')) el.hidden = el.id !== name
   $('save-bar').hidden = name === 'diagnostics'
+  if (name === 'diagnostics' && ready) void refreshReport()
 }
 
 function populate(options) {
@@ -148,7 +150,7 @@ async function load() {
     populate(baseline)
     ready = true
     message('')
-    if (!panel) { await DucoroResources.refresh(); await refreshReport() }
+    if (!panel) { await DucoroResources.refresh(); if (!$('diagnostics').hidden) await refreshReport() }
   } catch (error) {
     message(`无法读取设置：${error.message}`, true)
     $('connection-state').textContent = '配置尚未读取，未执行任何修改'
@@ -181,9 +183,8 @@ function showReport(report) {
   $('report-empty').hidden = true
   $('report-view').hidden = false
   const date = report.updatedAt ? new Date(report.updatedAt).toLocaleString() : '报告未提供时间'
-  const age = report.updatedAt ? Date.now() - Date.parse(report.updatedAt) : null
-  const stale = age === null || age > 5 * 60_000 || age < -60_000
-  $('report-time').textContent = `生成时间：${date}${stale ? ' · 请重新导出以确认当前状态' : ''}`
+  const synced = report.lastSyncedAt ? new Date(report.lastSyncedAt).toLocaleString() : '尚未完成同步'
+  $('report-time').textContent = `查看时间：${date} · 最近同步：${synced}${report.stale ? ' · 同步结果待更新' : ''}`
   $('report-cards').replaceChildren()
   for (const [key, title] of Object.entries(FEATURE_NAMES)) {
     const item = report.features[key]
@@ -204,27 +205,30 @@ function showReport(report) {
     if (issue.targets.length) el.append(node('p', `受影响 Bot：${issue.targets.join('、')}`))
     $('report-issues').append(el)
   }
-  message(`已读取诊断报告${report.pluginVersion ? `（${report.pluginVersion}）` : ''}。可点击刷新报告读取最新结果。`, false, 'report-message')
+  message(`${report.syncing ? '正在同步，当前显示最近已完成的结果。' : '已生成本次诊断报告。'}报告仅在页面中显示，不保存到本机。`, false, 'report-message')
 }
 
 async function refreshReport() {
-  try { const report = await ducoroApi('report'); if (!report) throw Error('尚无同步报告，请等待插件完成同步后刷新。'); showReport(parseDiagnosticReport(report)) }
-  catch(error) { message(error.message,true,'report-message') }
-}
-
-async function importReport(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
+  const request = ++reportRequest
+  $('refresh-report').disabled = true
+  $('report-view').hidden = true
+  $('report-empty').hidden = true
+  $('report-cards').replaceChildren()
+  $('report-issues').replaceChildren()
+  message('正在生成实时诊断报告…', false, 'report-message')
   try {
-    if (file.size > 2 * 1024 * 1024) throw Error('报告文件超过 2 MB，请重新生成精简诊断报告。')
-    const report = parseDiagnosticReport(JSON.parse(await file.text()))
-    showReport(report)
-  } catch (error) { message(`无法导入报告：${error.message}`, true, 'report-message') }
-  event.target.value = ''
+    const report = parseDiagnosticReport(await ducoroApi('report'))
+    if (request === reportRequest) showReport(report)
+  } catch(error) {
+    if (request === reportRequest) {
+      $('report-empty').hidden = false
+      message(error.message, true, 'report-message')
+    }
+  } finally { if (request === reportRequest) $('refresh-report').disabled = busy || !ready }
 }
 
-document.addEventListener('input', event => { if (event.target.id !== 'report-file') dirty() })
-document.addEventListener('change', event => { if (event.target.id !== 'report-file') dirty() })
+document.addEventListener('input', dirty)
+document.addEventListener('change', dirty)
 $('save').addEventListener('click', save)
 $('reload').addEventListener('click', () => {
   // Reload is explicit: the user can replace their unsaved draft from here.
@@ -237,7 +241,6 @@ if (!panel) {
   for (const key of ['modelScope','mcpScope','skillsScope']) $(key).addEventListener('change', () => { DucoroResources.scopes({[key]:$(key).value}); dirty() })
   $('refresh-report').addEventListener('click',refreshReport)
   $('retry-sync').addEventListener('click',async () => { try { await ducoroApi('retry',{}); message('已请求重新同步，请稍后刷新报告。',false,'report-message') } catch(error) { message(error.message,true,'report-message') } })
-  $('report-file').addEventListener('change', importReport)
 }
 
 if (!globalThis.magpie?.ready || !globalThis.magpie?.options) {

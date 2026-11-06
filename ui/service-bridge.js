@@ -29,9 +29,21 @@
     onAction: fn => {handlers.add(fn); for (const value of actions.splice(0)) fn(value)},
   }
   globalThis.ducoroApi = async (path,body) => {
-    const response = await fetch(`api/${path}`, {method: body === undefined ? 'GET' : 'POST', headers:{'X-Ducoro-Token':document.querySelector('meta[name="ducoro-token"]').content, ...(body === undefined ? {} : {'Content-Type':'application/json'})}, body: body === undefined ? undefined : JSON.stringify(body), signal:AbortSignal.timeout(60000)})
-    const value = await response.json()
-    if (!response.ok) throw Error(value.error || '读取失败，请重试。')
+    let response
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await fetch(`api/${path}`, {method: body === undefined ? 'GET' : 'POST', cache:'no-store', headers:{'X-Ducoro-Token':document.querySelector('meta[name="ducoro-token"]').content, ...(body === undefined ? {} : {'Content-Type':'application/json'})}, body: body === undefined ? undefined : JSON.stringify(body), signal:AbortSignal.timeout(60000)})
+        break
+      } catch {
+        // Reloading plugin settings briefly replaces the host. Retry reads
+        // only: mutations must never be replayed after an unknown outcome.
+        if (body !== undefined || attempt >= 2) throw Error('暂时无法连接 Ducoro 插件页面服务。请稍后重试；若持续失败，请在 Magpie 中重新加载插件并打开 Ducoro 页面。')
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
+      }
+    }
+    let value
+    try { value = await response.json() } catch { throw Error('页面服务返回内容无效，请重新打开 Ducoro 页面。') }
+    if (!response.ok) throw Error(value?.error || '读取失败，请重试。')
     return value
   }
 })()

@@ -49,7 +49,7 @@ import { createTotalSync } from "./total.mjs"
 import { createModelSync } from "./model-sync.mjs"
 import { OFFICIAL_PROVIDERS, resolveCapabilityMappings } from "./model-capabilities.mjs"
 import { mcpCommand, needsResourceTargets, planResourceScopes, scopedLibrary, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
-import { createDiagnostics } from "./diagnostics.mjs"
+import { createDiagnostics, removeLegacyReports } from "./diagnostics.mjs"
 import { validateOptions } from "./options.mjs"
 
 const HOME = homedir()
@@ -265,9 +265,7 @@ const createEngine = (input = {}, options = {}) => {
   const stateFile = join(stateDir, "state.json")
   paths.instructions = pathFromEnv("DUCORO_BRIDGE_INSTRUCTIONS_FILE", join(HOME, ".ducoro", "magpie-instructions.md"))
   paths.ducoroHome = pathFromEnv("DUCORO_BRIDGE_DUCORO_HOME", join(HOME, ".ducoro"))
-  paths.report = join(stateDir, "total-status.json")
-  paths.capabilityReport = join(stateDir, "model-capabilities.json")
-  const diagnostics = createDiagnostics({ stateDir, options: opts })
+  const diagnostics = createDiagnostics({ options: opts })
   let totalForRound = null
   let capabilitiesForRound = null
 
@@ -502,18 +500,9 @@ const createEngine = (input = {}, options = {}) => {
       if (entry.status !== "matched" || entry.warnings.length) warnOnce(
         `capability:${JSON.stringify(entry)}`,
         `model ${entry.id}: ${entry.status}; ${entry.reference ? `reference ${entry.reference} (${entry.source})` : "no automatic reference; set modelCapabilityRefs if needed"}` +
-          (entry.warnings.length ? `; ${entry.warnings.join(", ")}` : "") + `; details: ${paths.capabilityReport}`,
+          (entry.warnings.length ? `; ${entry.warnings.join(", ")}` : "") + "; details: open Ducoro sync diagnostics",
       )
     }
-    if (dryRun) return
-    const report = { version: 1, connectionSlug: String(opts.connectionSlug), applied, entries: plan.entries }
-    const old = await readJson(paths.capabilityReport)
-    if (old) delete old.updatedAt
-    if (JSON.stringify(old) === JSON.stringify(report)) return
-    const temp = `${paths.capabilityReport}.${process.pid}.tmp`
-    await mkdir(stateDir, { recursive: true })
-    await writeFile(temp, JSON.stringify({ ...report, updatedAt: new Date().toISOString() }, null, 2) + "\n", { mode: 0o600 })
-    await rename(temp, paths.capabilityReport)
   }
 
   const stageCapabilities = async (plan) => {
@@ -1353,7 +1342,7 @@ const createEngine = (input = {}, options = {}) => {
     const invalidOptions = validateOptions(opts)
     if (invalidOptions.length) {
       // Invalid access selections must never fall through to an inherited or
-      // global resource plan. The report is the only file written this round.
+      // global resource plan. Diagnostics remain in memory for this round.
       log("invalid plugin options:", invalidOptions.map(item => `${item.field}:${item.code}`).join(", "))
       requestRetry("options-invalid")
       return
@@ -1457,10 +1446,10 @@ const createEngine = (input = {}, options = {}) => {
         await syncAllUnlocked(reason)
       } catch (error) {
         diagnostics.retry("sync-failed")
-        await diagnostics.write({ state, total: totalForRound, capabilities: capabilitiesForRound })
+        await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
         throw error
       }
-      await diagnostics.write({ state, total: totalForRound, capabilities: capabilitiesForRound })
+      await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
       if (locked) await rm(lock, { recursive: true, force: true })
@@ -1636,8 +1625,9 @@ const createEngine = (input = {}, options = {}) => {
     const generation = ++lifecycleGeneration
     stopped = false
     watching = true
+    if (!dryRun) await removeLegacyReports(stateDir)
     if (!dryRun) pageService = await createPageService({ options: opts, paths, stateDir, run, trigger,
-      getReport: () => readJson(join(stateDir, "sync-status.json")), log })
+      getReport: () => diagnostics.read({ syncing }), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)
@@ -1682,6 +1672,7 @@ const createEngine = (input = {}, options = {}) => {
 
   return {
     opts, paths, stateFile, start, stop, syncAll, trigger, drainMcpProbes,
+    getReport: () => diagnostics.read({ syncing }),
     get state() { return state },
     get currentResourceTargets() { return resourcePlan ? [...resourcePlan.targets] : null },
     get watchedPaths() { return [...watchers.keys()] },

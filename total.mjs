@@ -1,7 +1,7 @@
 // Total's additional resources. Never execute hook commands as a substitute
 // for runtime events: a filesystem notification is not a tool/session event.
 import { readFile, writeFile, mkdir, rename, rm, realpath, lstat } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
 // Keep legacy ownership markers so upgrades can restore existing Profiles.
@@ -192,12 +192,6 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
     report.ok = report.errors.length === 0
     // Full support is deliberately false until both products expose adapters.
     report.fullLibrarySupport = false
-    if (!opts.dryRun) {
-      await mkdir(dirname(paths.report), { recursive: true })
-      const temp = `${paths.report}.${process.pid}.tmp`
-      await writeFile(temp, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 })
-      await rename(temp, paths.report)
-    }
     for (const error of report.errors) log(`Total ${error.resource}: ${error.message}`)
     return report
   }

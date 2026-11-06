@@ -82,11 +82,13 @@ const safeText = (value, fallback = '') => typeof value === 'string' ? value.sli
 const stringList = value => Array.isArray(value) ? value.filter(x => typeof x === 'string').slice(0, 256).map(x => x.slice(0, 200)) : []
 
 function parseDiagnosticReport(raw) {
-  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error('这不是受支持的 Ducoro 诊断报告。请选择 0.3.4 生成的 sync-status.json 或诊断导出文件。')
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error('实时诊断报告格式无法识别，请更新插件并重新打开页面。')
   const issues = Array.isArray(raw.issues) ? raw.issues : []
   const cleanIssue = issue => ({ feature: safeText(issue.feature), code: safeText(issue.code), message: safeText(issue.message, '需要进一步检查'), nextAction: safeText(issue.nextAction), targets: stringList(issue.targets) })
   return {
     updatedAt: typeof raw.updatedAt === 'string' && Number.isFinite(Date.parse(raw.updatedAt)) ? raw.updatedAt : null,
+    lastSyncedAt: typeof raw.lastSyncedAt === 'string' && Number.isFinite(Date.parse(raw.lastSyncedAt)) ? raw.lastSyncedAt : null,
+    stale: raw.stale === true, syncing: raw.syncing === true,
     pluginVersion: safeText(raw.pluginVersion), status: Object.hasOwn(STATUS_NAMES, raw.status) ? raw.status : 'unknown',
     targets: stringList(raw.targets),
     features: Object.fromEntries(Object.entries(FEATURE_NAMES).map(([key]) => {

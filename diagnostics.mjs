@@ -1,6 +1,7 @@
 // Public diagnostics contain configuration facts only. Never copy CLI output,
 // raw exception messages, resource contents, credentials or endpoint URLs here.
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rm } from 'node:fs/promises'
+import { request } from 'node:http'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -48,12 +49,13 @@ const REASONS = {
   'watch-error': [FEATURES, '文件监听暂时不可用。', '等待定时对账；持续出现时重新启用插件。'],
   'watch-missing': [FEATURES, '部分源文件尚不存在。', '确认 Magpie 已导出配置与所选资源。'],
   'watch-refresh': [FEATURES, '文件监听刷新未完成。', '等待自动重试；持续出现时重新启用插件。'],
-  'mapping-review': ['models', '部分模型能力参考需要人工确认。', '查看 model-capabilities.json，按实际能力指定或禁用参考映射。'],
+  'mapping-review': ['models', '部分模型能力参考需要人工确认。', '查看同步诊断，按实际能力指定或禁用参考映射。'],
   'mapping-unapplied': ['models', '模型能力参考更新尚未核实。', '检查连接同步是否成功，然后等待重试。'],
   'instruction-pending': ['instructions', '指令尚未完成配置。', '检查 Magpie 指令导出及目标 Bot 的 Profile。'],
   'subagent-pending': ['subagents', '部分子代理尚未完成配置。', '检查显式选择、定义字段及本地 Ducoro 守护进程。'],
   'targets-empty': [['instructions', 'subagents'], '没有可用的目标 Bot。', '将 Bot 绑定到 Magpie 连接，或填写目标 Bot ID。'],
-  'report-missing': [FEATURES, '尚无统一同步报告。', '启动 0.3.4 插件并等待完成一次同步。'],
+  'report-missing': [FEATURES, '插件尚未完成本次启动后的同步。', '等待同步完成后重新查看报告。'],
+  'service-unavailable': [FEATURES, '无法连接插件的实时诊断服务。', '确认 Magpie 已启用 Ducoro 插件；重新打开页面，或检查服务端口。'],
   'report-invalid': [FEATURES, '同步报告不可读或格式无效。', '启动插件重新同步以生成报告。'],
   'diagnostics-issue': [FEATURES, '同步需要进一步检查。', '查看插件日志并重新同步。'],
 }
@@ -184,34 +186,51 @@ export function defaultStateDir(env = process.env) {
   return env.DUCORO_BRIDGE_STATE_DIR?.trim() || join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'), 'magpie', 'ducoro-bridge')
 }
 
-async function readSmallJson(file) {
+// Only known, plugin-owned legacy reports are removed; ownership state and
+// backups are required for safe revocation and must remain on disk.
+export async function removeLegacyReports(stateDir = defaultStateDir()) {
+  const names = await readdir(stateDir).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+  const legacy = /^(sync-status|total-status|model-capabilities)\.json(?:\.\d+\.tmp)?$/
+  await Promise.all(names.filter(name => legacy.test(name)).map(name => rm(join(stateDir, name), { force: true })))
+}
+
+// The CLI reads the running service, never an old report file. Loopback HTTP
+// avoids environment proxy settings; the page token stays in a request header.
+export async function readDiagnostics({ stateDir = defaultStateDir(), port = 3487, timeoutMs = 5000, now = new Date() } = {}) {
   try {
-    if ((await stat(file)).size > 2 * 1024 * 1024) return { error: 'report-invalid' }
-    return { value: JSON.parse(await readFile(file, 'utf8')) }
-  } catch (error) { return { error: error.code === 'ENOENT' ? 'report-missing' : 'report-invalid' } }
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error()
+    const token = (await readFile(join(stateDir, 'page-token'), 'utf8')).trim()
+    if (!/^[a-f0-9]{64}$/.test(token)) throw Error()
+    const value = await new Promise((resolve, reject) => {
+      const req = request({ hostname: '127.0.0.1', port, path: '/api/report', headers: { 'X-Ducoro-Token': token } }, res => {
+        let size = 0, chunks = []
+        res.on('data', chunk => {
+          size += chunk.length
+          if (size > 2 * 1024 * 1024) { res.destroy(); reject(Error()); return }
+          chunks.push(chunk)
+        })
+        res.on('error', reject)
+        res.on('end', () => {
+          try { if (res.statusCode !== 200) throw Error(); resolve(JSON.parse(Buffer.concat(chunks).toString())) } catch (error) { reject(error) }
+        })
+      })
+      const timer = setTimeout(() => req.destroy(Error('timeout')), timeoutMs)
+      req.once('close', () => clearTimeout(timer))
+      req.on('error', reject)
+      req.end()
+    })
+    const report = sanitizeDiagnostics(value)
+    if (!report) throw Error()
+    return { ...report, lastSyncedAt: timestamp(value.lastSyncedAt), syncing: value.syncing === true, stale: value.stale === true, observedAt: new Date(now).toISOString() }
+  } catch {
+    const report = buildDiagnostics({ now })
+    addIssue(report, 'service-unavailable', FEATURES, [], { pending: false })
+    return { ...summarize(report), lastSyncedAt: null, stale: true, observedAt: new Date(now).toISOString() }
+  }
 }
 
-export async function readDiagnostics({ stateDir = defaultStateDir(), now = new Date(), staleAfterMs = 300_000 } = {}) {
-  const { value, error } = await readSmallJson(join(stateDir, 'sync-status.json'))
-  let report = sanitizeDiagnostics(value)
-  if (!report) {
-    report = buildDiagnostics({ now })
-    addIssue(report, error || 'report-invalid', FEATURES, [], { pending: false })
-    report = summarize(report)
-    report.updatedAt = null
-  }
-  const age = report.updatedAt ? new Date(now).getTime() - Date.parse(report.updatedAt) : null
-  return { ...report, observedAt: new Date(now).toISOString(), stale: age === null || age > staleAfterMs || age < -60_000, ageMs: age === null ? null : Math.max(age, 0) }
-}
-
-export function createDiagnostics({ stateDir = defaultStateDir(), options = {}, now = () => new Date() } = {}) {
-  let round = null
-  const writeReport = async report => {
-    const target = join(stateDir, 'sync-status.json')
-    const temporary = `${target}.${process.pid}.tmp`
-    await writeFile(temporary, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 })
-    await rename(temporary, target)
-  }
+export function createDiagnostics({ options = {}, now = () => new Date() } = {}) {
+  let round = null, completed = null
   return {
     begin(reason = 'sync') { round = { roundId: randomUUID(), reason, startedAt: now().toISOString(), stages: {}, retries: [] } },
     token() { return round?.roundId ?? null },
@@ -223,33 +242,27 @@ export function createDiagnostics({ stateDir = defaultStateDir(), options = {}, 
     retry(reason, features, targets) {
       if (round) round.retries.push({ code: Object.hasOwn(REASONS, reason) ? reason : 'sync-failed', features, targets })
     },
-    async write({ state, total, capabilities } = {}) {
-      if (!round) return null
-      const report = buildDiagnostics({ ...round, retries: [...round.retries], options, state, total, capabilities, now: now() })
-      if (options.dryRun === true || options.dryRun === 'true') return report
-      await mkdir(stateDir, { recursive: true })
-      await writeReport(report)
-      return report
+    // Retain bounded facts from one completed round. Report JSON is only built
+    // on a read; later state mutations cannot alter the completed round.
+    async complete({ state, total, capabilities } = {}) {
+      if (!round) return
+      completed = structuredClone({ ...round, options, state, total, capabilities, completedAt: now().toISOString(), probeStatus: null })
     },
-    // A probe runs outside the mutation lock. Fence its late result against
-    // both another round in this host and reports written by another host.
-    // Only the bounded report read/write occurs while holding the same lock.
+    read({ syncing = false } = {}) {
+      const date = now()
+      const report = buildDiagnostics({ ...(completed ?? { options }), now: date })
+      if (!completed) { addIssue(report, 'report-missing', FEATURES, [], { pending: false }); summarize(report) }
+      if (completed?.probeStatus) {
+        report.features.mcp.probeStatus = completed.probeStatus
+        if (completed.probeStatus === 'failed') { addIssue(report, 'mcp-probe', ['mcp']); summarize(report) }
+      }
+      const age = completed ? date.getTime() - Date.parse(completed.completedAt) : null
+      return { ...report, lastSyncedAt: completed?.completedAt ?? null, syncing, stale: age === null || age > 300_000 || age < -60_000 }
+    },
     async probeResult(token, okay) {
-      if (!validRoundId(token) || round?.roundId !== token || typeof okay !== 'boolean' || options.dryRun === true || options.dryRun === 'true') return false
-      const lock = join(stateDir, 'sync.lock')
-      let locked = false
-      try {
-        try { await mkdir(lock); locked = true } catch (error) { if (error.code === 'EEXIST' || error.code === 'ENOENT') return false; throw error }
-        await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }))
-        const { value } = await readSmallJson(join(stateDir, 'sync-status.json'))
-        const report = sanitizeDiagnostics(value)
-        if (!report || report.roundId !== token) return false
-        report.features.mcp.probeStatus = !okay || report.features.mcp.probeStatus === 'failed' ? 'failed' : 'passed'
-        if (!okay) addIssue(report, 'mcp-probe', ['mcp'])
-        if (round?.roundId !== token) return false
-        await writeReport(summarize(report))
-        return true
-      } finally { if (locked) await rm(lock, { recursive: true, force: true }) }
+      if (!validRoundId(token) || round?.roundId !== token || completed?.roundId !== token || typeof okay !== 'boolean') return false
+      completed.probeStatus = !okay || completed.probeStatus === 'failed' ? 'failed' : 'passed'
+      return true
     },
   }
 }

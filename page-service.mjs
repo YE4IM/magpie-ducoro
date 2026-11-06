@@ -58,7 +58,7 @@ export async function inventory({ options, paths, run }) {
   return { bots, models, defaultModel: text(route?.defaultModel), library, catalog, warnings, updatedAt: new Date().toISOString() }
 }
 
-export async function createPageService({ options, paths, stateDir, run, trigger, getReport, log = () => {} }) {
+export async function createPageService({ options, paths, stateDir, run, trigger, getReport, log = () => {}, retryDelayMs = 500 }) {
   await mkdir(stateDir,{recursive:true})
   const tokenFile=join(stateDir,'page-token')
   try { await writeFile(tokenFile,randomBytes(32).toString('hex'),{flag:'wx',mode:0o600}) }
@@ -130,11 +130,37 @@ export async function createPageService({ options, paths, stateDir, run, trigger
       reply(200, body, types[file.split('.').pop()])
     } catch { reply(503,{error:'读取失败，请检查 Ducoro 是否运行，然后重试。'}) }
   })
-  await new Promise((resolve,reject) => { server.once('error',reject); server.listen(port,'127.0.0.1',resolve) }).catch(error => {
-    // A CLI-only host may coexist with the window's service. Never steal ports.
-    if (error.code !== 'EADDRINUSE') throw error
-    log('Ducoro page service port is already in use; this host serves no page')
+  // Hosts overlap during reload. Keep trying after the old listener exits,
+  // without closing or replacing a listener owned by another process.
+  let closed = false, retryTimer = null, listening = false, warned = false
+  const listen = () => new Promise((resolve, reject) => {
+    const onError = error => {
+      server.removeListener('listening', onListening)
+      if (error.code !== 'EADDRINUSE') return reject(error)
+      if (!warned) { log('Ducoro page service port is busy; waiting to reconnect'); warned = true }
+      if (!closed) {
+        retryTimer = setTimeout(() => { retryTimer = null; void listen().catch(() => log('Ducoro page service could not restart')) }, retryDelayMs)
+        retryTimer.unref?.()
+      }
+      resolve()
+    }
+    const onListening = () => {
+      server.removeListener('error', onError)
+      listening = true
+      if (warned) log('Ducoro page service reconnected')
+      resolve()
+    }
+    server.once('error', onError)
+    server.once('listening', onListening)
+    server.listen(port, '127.0.0.1')
   })
+  await listen()
   server.unref()
-  return { close: () => new Promise(resolve => { server.closeAllConnections?.(); server.close(() => resolve()) }) }
+  return { get listening() { return listening }, close: () => new Promise(resolve => {
+    closed = true
+    clearTimeout(retryTimer)
+    listening = false
+    server.closeAllConnections?.()
+    server.close(() => resolve())
+  }) }
 }
