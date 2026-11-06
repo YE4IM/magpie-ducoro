@@ -96,7 +96,6 @@ npm test
 ## 相关文档
 
 - 版本历史：[CHANGELOG.md](CHANGELOG.md)
-- 0.3.1 实机验证记录：[LIVE-TEST.md](LIVE-TEST.md)
 
 ## 许可证
 

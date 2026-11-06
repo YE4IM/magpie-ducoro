@@ -96,7 +96,6 @@ Tests use isolated temporary directories and a fake `ducoro-cli`; they do not ch
 ## Notes
 
 - Version history: [CHANGELOG.md](CHANGELOG.md)
-- 0.3.1 on-device validation record: [LIVE-TEST.md](LIVE-TEST.md)
 
 ## License
 
