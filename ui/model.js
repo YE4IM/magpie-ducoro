@@ -15,6 +15,7 @@ const SWITCHES = [
   ['syncSubagents', t('子代理'), t('同步显式选择的角色定义')],
 ]
 const DEFAULT_OPTIONS = {
+  botPlansCatalog: {}, botPlans: {}, botInstructions: {}, pausedModels: [], modelGuards: {},
   connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
   syncMcp: true, syncSkills: true, syncInstructions: true, syncSubagents: true,
   prune: true, onDisconnect: 'keep', targetAgents: [], subagentNames: [],

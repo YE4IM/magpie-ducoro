@@ -1,6 +1,7 @@
 import "./ui/i18n.js";
 const { format, translate, message } = globalThis.DucoroI18n;
 // Read-only, projected plan: never return ownership records, endpoints or credentials.
+import { contentChanges } from "./content-preview.mjs";
 import { join } from "node:path";
 import { readManagedState } from "./state-store.mjs";
 import {
@@ -55,6 +56,7 @@ export async function detectCapabilities(run) {
 export async function buildSyncPreview({
   options,
   currentOptions,
+  paths,
   data,
   stateDir,
   run,
@@ -192,6 +194,12 @@ export async function buildSyncPreview({
       }
     }
   } else warn("资源库暂不可读：连接器与技能的变更预览不可用。");
+  try {
+    for (const change of await contentChanges({ paths, state, options, bots })) {
+      const { scope, ...resource } = change;
+      rowFor(scope).resources.push(resource);
+    }
+  } catch { warn("资源内容暂不可读取，内容变化需在同步时核实。"); }
   for (const bot of bots) {
     const row = rowFor(bot.id);
     const target = modelTarget(options, bot.id, data.defaultModel);
@@ -330,7 +338,7 @@ export async function buildSyncPreview({
       "指令与子代理设置也有变化；具体内容及本地运行条件需在同步诊断中核实。",
     );
   warn(
-    "此预览核对资源分配范围、模型与账户工具权限。资源内容更新、同名冲突、模型能力和运行中会话加载情况将在同步时再次校验。",
+    "此预览核对资源分配范围、模型与账户工具权限。技能与指令已按可读取内容比较；同名冲突、模型能力和运行中会话加载情况仍需在同步时再次校验。",
   );
   return result;
 }

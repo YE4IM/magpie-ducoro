@@ -60,6 +60,15 @@ export function validateOptions(options) {
       }
     }
   }
+  for (const field of ['botPlansCatalog','botPlans','botInstructions']) if (options[field] !== undefined && !record(options[field])) fail(field,'object-required')
+  for (const [name, plan] of Object.entries(record(options.botPlansCatalog) ? options.botPlansCatalog : {})) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name) || ['__proto__','constructor','prototype'].includes(name) || !record(plan)) { fail('botPlansCatalog','plan-invalid'); continue }
+    if (Object.keys(plan).some(k => !['name','model','mcp','skills','instructions'].includes(k)) || (plan.name !== undefined && !nonempty(plan.name)) || (plan.model !== undefined && !nonempty(plan.model)) || ['mcp','skills'].some(k => plan[k] !== undefined && !names(plan[k])) || (plan.instructions !== undefined && (typeof plan.instructions !== 'string' || plan.instructions.length > 100000))) fail('botPlansCatalog','plan-invalid')
+  }
+  for (const [id,name] of Object.entries(record(options.botPlans) ? options.botPlans : {})) if (!botId(id) || typeof name !== 'string' || !Object.hasOwn(options.botPlansCatalog ?? {},name)) fail('botPlans','plan-assignment-invalid')
+  for (const [id,text] of Object.entries(record(options.botInstructions) ? options.botInstructions : {})) if (!botId(id) || typeof text !== 'string' || text.length > 100000) fail('botInstructions','instructions-invalid')
+  if (options.pausedModels !== undefined && (!Array.isArray(options.pausedModels) || !options.pausedModels.every(botId))) fail('pausedModels','bot-list-invalid')
+  if (options.modelGuards !== undefined && (!record(options.modelGuards) || Object.entries(options.modelGuards).some(([id,row]) => !botId(id) || !record(row) || !/^[a-f0-9]{64}$/.test(row.revision ?? '') || !nonempty(row.model)))) fail('modelGuards','guard-invalid')
   return errors
 }
 

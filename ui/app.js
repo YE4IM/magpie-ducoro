@@ -18,6 +18,7 @@
     const $ = (id) => document.getElementById(id);
     const panel = document.body.dataset.panel === "true";
     let baseline = null;
+    let extensionDraft = {};
     let ready = false;
     let busy = false;
     let reportRequest = 0;
@@ -179,6 +180,18 @@
         )
           throw DucoroI18n.error(t("上游模型目录格式无法识别。"));
         catalogModels = result.models;
+        const explanations = $("model-explanations"); explanations.replaceChildren();
+        for (const entry of result.entries ?? []) {
+          const row = node("article", undefined, "issue");
+          const statuses = {matched:t("自动匹配成功"), "capability-mismatch":t("能力存在差异"), "unrecognized-model":t("无法识别模型身份"), "mixed-models":t("组内模型身份不一致"), "no-official-match":t("未找到官方参考"), disabled:t("已禁用"), "catalog-unavailable":t("目录不可用"), "membership-unavailable":t("模型组成员暂不可读"), "cyclic-group":t("模型组存在循环引用"), "empty-group":t("模型组为空")};
+          const sources = {option:t("设置中手动覆盖"), manual:t("手动覆盖"), automatic:t("自动匹配"), auto:t("自动匹配"), retained:t("沿用上次参考"), none:t("无参考")};
+          row.append(node("strong", entry.id), node("p", t`来源：${sources[entry.source] ?? entry.source}；参考：${entry.reference ?? t("无")}；${statuses[entry.status] ?? entry.status}`));
+          if (entry.commonCapabilities) row.append(node("p", t`组内共同能力：上下文 ${entry.commonCapabilities.contextWindow ?? t("未确认")}；思考档位 ${entry.commonCapabilities.thinkingLevels?.length ? DucoroI18n.joinMessages(entry.commonCapabilities.thinkingLevels) : t("未确认")}`));
+          const reasons = {"reference-context-exceeds-member-limit":t("参考上下文大于组内模型限制"), "reference-thinking-exceeds-member-levels":t("参考思考档位超过组内共同能力"), "member-capabilities-incomplete":t("组内能力信息不完整"), "reference-model-differs":t("参考模型身份不同"), "manual-reference-not-in-catalog":t("手动参考已不在目录中")};
+          for (const warning of entry.warnings ?? []) row.append(node("p", reasons[warning] ?? warning));
+          explanations.append(row);
+        }
+        if (!result.entries?.length) explanations.append(node("p", t("暂无匹配记录；同步后刷新上游列表查看。")));
         DucoroI18n.setText(
           $("catalog-state"),
           t`${catalogModels.length} 个模型 · 最近读取 ${DucoroI18n.dateTime(result.updatedAt)}`,
@@ -234,7 +247,8 @@
       if (name === "diagnostics" && ready) void refreshReport();
     }
 
-    function populate(options) {
+    function populate(options, preserveResourceBaseline = false) {
+      extensionDraft = Object.fromEntries(["botPlansCatalog","botPlans","botInstructions","pausedModels","modelGuards"].map(key=>[key,structuredClone(options[key] ?? DEFAULT_OPTIONS[key])]));
       for (const [key] of SWITCHES) $(key).checked = options[key];
       if (!panel) {
         $("connectionSlug").value = options.connectionSlug;
@@ -247,7 +261,7 @@
             options[key] === "global" ? "agents" : options[key];
         }
         updateToggleLabels();
-        DucoroResources.set(options);
+        DucoroResources.set(options, preserveResourceBaseline);
         $("references").replaceChildren();
         for (const [route, ref] of Object.entries(options.modelCapabilityRefs))
           addReference(route, ref);
@@ -286,9 +300,11 @@
           writable: true,
         });
       }
-      Object.assign(options, DucoroResources.collect());
+      Object.assign(options, DucoroResources.collect(), extensionDraft);
       return options;
     }
+
+    globalThis.DucoroWorkspace = { collect, ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
 
     function hasChanges() {
       if (!ready) return false;
@@ -345,8 +361,10 @@
         baseline = optionsForDisplay(raw ?? {});
         populate(baseline);
         ready = true;
+        document.dispatchEvent(new Event("ducoro-workspace"));
         message("");
         setBusy(false);
+        document.dispatchEvent(new Event("ducoro-workspace"));
         if (!panel) {
           void DucoroResources.refresh();
           void refreshCatalog();
@@ -392,6 +410,8 @@
               t("配置在预览期间已变化，请重新读取并再次预览。"),
             );
         }
+        if (!panel) await ducoroApi("checkpoints", { before: current, after: options });
+        document.dispatchEvent(new Event("ducoro-saving"));
         const savedAt = Date.now();
         const watch = ++syncWatch;
         const saved = await globalThis.magpie.options.set(options);
@@ -479,6 +499,8 @@
     }
 
     function showReport(report) {
+      DucoroResources.setIssues(report.issues);
+      document.dispatchEvent(new Event("ducoro-report"));
       hasReport = true;
       $("report-empty").hidden = true;
       $("report-view").hidden = false;
@@ -548,6 +570,15 @@
           el.append(
             node("p", t`受影响 Bot：${DucoroI18n.joinMessages(issue.targets)}`),
           );
+        const go = node("button", issue.targets.length ? t("定位 Bot 并重新读取") : t("前往相关设置"), "secondary");
+        go.type = "button";
+        go.addEventListener("click", () => {
+          setTab(issue.targets.length ? "resources" : "settings");
+          if (issue.targets.length) { DucoroResources.focusBot(issue.targets[0]); void DucoroResources.refresh(); }
+          else document.getElementById(issue.feature === "models" ? "references" : "switches")?.scrollIntoView({ behavior: "smooth" });
+        });
+        el.append(go);
+        if (issue.feature === "models") { const mapping = node("button", t("调整模型映射"), "secondary"); mapping.onclick = () => { setTab("settings"); $("references").closest("details").open = true; $("references").scrollIntoView(); }; el.append(mapping); }
         $("report-issues").append(el);
       }
       message(

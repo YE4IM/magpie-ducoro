@@ -1,68 +1,103 @@
-# Ducoro 0.4.1
+# Ducoro 0.4.2
 
-[简体中文](README.zh-CN.md)
+Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro. Manage assignments for individual Bots from the plugin page.
 
-A Magpie plugin that synchronizes model connections, connectors, skills, instructions and selected subagents with Ducoro.
+## Installation
 
-The interface automatically follows Magpie’s UI language: Simplified and Traditional Chinese use the Chinese interface; all other or unknown languages use English. There is no manual language selector or language option. Language changes update page text and accessibility labels without resetting unsaved settings or assignments. User-defined Bot, model and resource names remain unchanged. API errors and diagnostic advice follow the page language; command-line diagnostics default to English.
+Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.2.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
-Install this folder or `magpie-ducoro-0.4.1.tgz` in Magpie and open **Ducoro** in the sidebar to manage sync settings, Bot resources and diagnostics. Requires `ducoro-cli`, a running Ducoro daemon and Magpie page-service support.
+Replace the previous plugin path or package when upgrading. Keep existing management records and assignments; do not enable two versions simultaneously.
 
-## Refined in 0.4.1
+## What's new
 
-- Preview account reads use at most four concurrent Bots and a 25-second account budget within a 40-second overall request budget. Partial failures retain other results, and disconnected requests stop pending reads.
-- Settings become editable before optional inventories and catalogs finish. Ordinary API calls share a 25-second deadline with at most one read retry; writes are never replayed automatically. Preview requests have a 45-second client deadline.
-- Shared busy states prevent background refreshes from unlocking a save or overwriting a newer draft. Reload asks before discarding edits.
-- Save feedback waits for a completed sync round instead of assuming completion after three seconds. Unconfirmed results remain explicit; report refreshes retain the previous report.
-- CLI lifecycle and inventory projections are separate modules, removing the service/preview/account import cycle. Critical modules are formatted for review.
-- New messages support Chinese and English, follow Magpie’s language, and preserve unsaved drafts during language changes.
+- Read configuration back after saving. Results distinguish verified, failed, unverified and skipped items. Rechecking is read-only and does not replay timed-out writes. Models and account policies support read-back; resource contents, skills, instructions and subagents remain unverified where evidence is incomplete.
+- Search Bots by name or ID, filter their status and see unsaved changes. Copy model, library connector and skill assignments to selected Bots after reviewing the affected targets. Copies change the draft; preview and save to apply. Account permissions are excluded.
+- Jump from diagnostics to the relevant settings. Inspect model matching sources, reasons and capability differences.
+- Preview content changes for resources with unchanged names, skill files and instructions. Unreadable content remains explicitly unverified.
+- Keep a bounded set of valid management backups, validate and preview them before restoring, or delete individual backups after confirmation. Deleting a backup does not change current records or Bot configuration.
+- English and Chinese presentation. Original Bot, model, resource and tool names and technical option keys are preserved.
 
-## Features introduced in 0.4.0
+Configuration verification does not prove that a running session has loaded the changes.
 
-- **Changes by Bot:** select **Preview changes** to inspect a draft. **Save settings** opens **Review before saving** before any options are saved. The preview lists global and per-Bot resource additions/removals, affected Bots, models and account tool permissions.
-- **Desired and current settings:** expand a Bot card to compare the desired Magpie model with the current Ducoro model and account tool permissions. The desired global model comes from Magpie’s export, even if Ducoro has not caught up yet.
-- **Account permission conflicts:** choose **Use current Ducoro permissions** or **Reapply Magpie permissions**. The choice stays in the draft until previewed and saved. It is bound to the observed policy and ownership revision; later external changes invalidate it.
-- **Host capabilities:** model catalog, model commands, account policy operations, per-Bot connectors and per-Bot skills are checked separately. An unavailable feature does not prevent other features from syncing. A local command being available does not prove server permissions or successful execution.
-- **Safer reconciliation:** account removals run before additions across Bots, and connector failures are isolated. Unreadable, damaged or unknown-version ownership records pause sync without replacing the original. Watch recovery backs off and triggers fallback sync only when sources change.
-- **Complete English and Chinese UI:** previews, conflict choices, capability explanations, recovery messages, API warnings and diagnostics follow Magpie’s language. Open dialogs and unsaved drafts survive language changes. Names, model IDs, tool IDs and permission values remain literal.
+## Preview and assignments
 
-The preview shares scope, model-target and account-policy planning with sync. It describes plugin-owned assignments, rather than all user-installed resources. Resource content updates, name conflicts, effective model capabilities, execution permissions and loading in running sessions are still verified during sync. A preview is not a promise of successful execution.
+**Preview changes** reads the draft without writing. **Save settings** first shows a preview and requires confirmation. The preview includes global and Bot additions and removals, and the impact on other Pi Agent Bots when moving from global resources to Bot assignments. It shares the synchronization planner, but cannot guarantee execution success or runtime loading. Ownership is based on plugin records, not user-installed resources.
 
-The resource page uses three aligned columns: models, connectors and skills. It automatically lists all Bots with read-only names and IDs. Models are single-select; library resources and account connector tools use checkboxes. Refresh preserves unsaved assignments. Unsupported Bots remain visible with explanations.
+The model, connector and skill scopes are independent. A scope switch enables assignment by Bot; turning it off selects global synchronization. Bot names and IDs are read-only. Refresh retains unsaved choices, removes deleted Bot draft entries only after a successful list read, and never treats a failed read as an empty list.
 
-Models can follow the global Magpie default or be pinned per Bot. Only Pi Agent Bots bound to the plugin connection are updated. Missing selected models retain the current preference and report pending synchronization.
+Models apply to Pi Agent Bots bound to the plugin connection. Global mode follows the Magpie default; Bot mode permits an override or inheritance. Unavailable models retain their previous setting and produce a pending result. Other runtimes and connection bindings are not changed automatically.
 
-Connectors share one UI column but retain separate sources. Magpie library connectors support global or Bot-local scope. Ducoro account connectors require an existing account connection and exact per-Bot tool policies. They are never automatically equipped on every Bot. Removing a plugin account assignment restores its previous policy; external edits are treated as conflicts.
+Connectors have two sources:
 
-Library skills and connectors are intersected with enabled resources assigned to Ducoro. Empty assignments revoke only plugin-managed resources, without masking unrelated global or user-owned resources. Explicit resource assignments can target Pi Agent Bots on another model connection.
+- **Magpie**: enabled library connectors assigned to Ducoro. These can be global or assigned to Pi Agent Bots.
+- **Ducoro**: account connectors configured in the Bot's account drawer. Connect the service in Ducoro first, then explicitly select allowed tools for each Bot. Closing the drawer retains the draft; save the page to apply.
 
-A loopback-only native HTTP service serves the page and a projected inventory. Default port: `3487`; Host reloads automatically retry binding after the old listener exits. Configure `servicePort` in Magpie options if another application keeps the port occupied. Magpie web uses its page-service proxy. Options remain in Magpie through its official page message protocol; saving reloads the host. APIs validate Host, Origin and a page token; credentials and raw account records are not exposed.
+Library connectors and skills support inheritance, explicit selection and no assignment. Empty lists mean the plugin assigns none; they do not block other global or user configurations. Explicit resource selections can include Pi Agent Bots that are not bound to the plugin model connection.
 
-Diagnostics are generated in memory on each visit or refresh from the latest completed sync. The page displays generation and last-sync times separately, including in-progress and stale states. Viewing never triggers synchronization; use **Retry sync** when needed. No diagnostic report files or history are saved. Startup removes the three legacy reports (`sync-status.json`, `total-status.json`, `model-capabilities.json`) and their temporary files; ownership state, page tokens and restoration backups remain.
+The first explicit account assignment records the previous policy. Revocation restores that policy, or removes a previously absent entry. External edits cause conflicts instead of being overwritten. Choose to keep Ducoro's current policy or reapply Magpie's policy, then preview and save. Conflict decisions are bound to the observed permissions and record revision; another external change invalidates them. Account availability also depends on pairing, service connection and runtime support. Revocations run before additions across Bots, and connector failures are isolated.
 
-`node diagnostics-cli.mjs [--json] [--port 3487]` reads the running service and prints to stdout without saving files. When the service is unavailable it reports that explicitly, without falling back to stale files. Manually redirected exports remain user-managed.
+## Language
 
-Options include `modelScope`, `botModels`, `accountConnectors`, `accountResolutions` and `servicePort`. Existing resource options and capability reference mappings remain available; see the Chinese guide for their contract. No configuration migration was added.
+The page follows the Magpie language setting: Simplified and Traditional Chinese use Chinese; all other and unknown languages fall back to English. Language changes preserve drafts, search, selections and open dialogs. Names and technical keys retain their original spelling. The diagnostics command defaults to English; pass `--lang zh` for Chinese or `--lang en` explicitly. JSON uses the selected language for presentation while retaining identifiers and structured configuration facts.
 
+## Model capability catalog
 
-## Ownership record recovery
+Automatic matching uses the official catalog exposed by the installed Ducoro version. Refreshing the upstream model list bypasses the five-minute cache, calls `ducoro-cli connections catalog` and requests another capability match. Search by model or provider to inspect reference IDs and context lengths. This does not download or upgrade Ducoro.
 
-**Sync diagnostics → Restore the ownership record** explains how to recover from an unreadable, damaged or unknown-version `state.json`. Check file permissions or restore your own valid backup, then select **Read the ownership record again**. The button requests another read; it does not clear or replace the record.
+Exact full IDs can match newly added models. Route groups require compatible member identities; mixed versions are not forced into a reference. Manual references take precedence and can pin or disable a mapping. Remove an override to resume automatic matching. Refresh preserves drafts and manual mappings. Failed reads retain the last valid catalog and references rather than revoking them.
 
-The default path is `~/.config/magpie/ducoro-bridge/state.json`, unless `XDG_CONFIG_HOME` or `DUCORO_BRIDGE_STATE_DIR` changes it. Do not delete or reset this file: it contains previous permissions and plugin ownership needed for safe removals. Versions 1 and 2 remain readable; no clearing or migration is required.
+## Local service and saving
 
-## Compatibility
+The page service listens on loopback at `127.0.0.1:3487` by default. Change `servicePort` in Magpie plugin options if needed. During reload, the service waits for the previous host to release the port. Magpie web mode uses its page-service proxy.
 
-Version 0.4.1 has been checked in Magpie desktop for layout alignment, draft protection, review before save, sync feedback and English/Chinese switching. A dedicated Bot verified real model preference writes, per-Bot switching, unavailable-model protection and return to the global model. Disconnected-account rejection was also verified. Successful connected-account permission writes, conflict reapplication and restoration still lack live coverage. Some model capability references require manual confirmation. The Magpie Web proxy path was not retested for 0.4.1.
+Saving uses Magpie's official page message channel, reloads the plugin host and triggers synchronization. API requests check Host, Origin and the page token. The page receives resource names and status, not connection credentials. Capability checks are feature-specific; command availability alone does not verify server permissions or successful execution.
 
-### Upstream model capabilities (0.4.1)
+## Diagnostics and recovery
 
-Capabilities follow the catalog supplied by the installed Ducoro version. **Sync upstream model list** bypasses the bridge’s five-minute cache, reads `ducoro-cli connections catalog`, and queues capability reconciliation. Update Ducoro first to obtain its latest catalog; this action does not download or upgrade Ducoro. Expand the catalog to search model/provider IDs and context limits. Exact upstream IDs also support new model families without a plugin update.
+Opening diagnostics or refreshing the report generates a live, in-memory report from the running plugin. Reports show observation time and last synchronization time, including stale and in-progress states. Reading a report does not trigger synchronization; retry synchronization separately, then refresh.
 
-Manual references are optional overrides and take priority over automatic matching. Remove an override to return to automatic matching. A failed refresh retains the last valid catalog and existing references; refresh preserves unsaved settings. Binary connection/scope options now use switches with explicit state labels.
+```sh
+node diagnostics-cli.mjs
+node diagnostics-cli.mjs --lang zh
+node diagnostics-cli.mjs --json --lang en
+node diagnostics-cli.mjs --port 3488
+node diagnostics-cli.mjs --doctor
+```
 
-Account connector settings open in a side drawer from **Account settings** beside each Bot’s connector heading. Closing the drawer retains the page draft; use **Save settings**, review the changes, then select **Save and sync** to apply them. Escape and the close button return to the Bot card.
+The CLI prints directly to the terminal and does not create report files. `--doctor` only reads daemon information; it does not call models, probe tools or modify configuration. If the plugin is unavailable, the command reports that fact instead of reading an old report.
+
+Legacy `sync-status.json`, `total-status.json`, `model-capabilities.json` and their temporary files are removed on startup. Ownership records, page tokens and skill recovery backups are retained.
+
+The default management file is `~/.config/magpie/ducoro-bridge/state.json`; `XDG_CONFIG_HOME` and `DUCORO_BRIDGE_STATE_DIR` can change its location. Unreadable, corrupt or unsupported records pause synchronization and preserve the original. Check permissions and storage, or preview and restore a compatible valid backup. Recovery restores management records, not Bot configuration; manually preview and synchronize afterward. Never delete or replace the file with an empty object: it contains previous permissions needed for safe revocation.
+
+## Validation limits
+
+Automated coverage includes account policy writes, external conflicts, reapplication and restoration, plus local HTTP proxy access constraints. Real CLI reads confirmed a running daemon and account catalog, but no connected account connector was available. Real account permission writes and the Magpie web proxy still require installation-level acceptance testing. Follow the installation environment; automated checks do not establish real account authorization.
+
+## Main options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `modelScope` | `global` | Global models or `agents` for Bot assignments |
+| `botModels` | `{}` | Bot ID to model ID; omitted entries inherit |
+| `mcpScope` | `global` | Global or Bot assignment of Magpie connectors |
+| `skillsScope` | `global` | Global or Bot skill assignment |
+| `resourceAssignments` | `{}` | Bot ID to `mcp` and `skills` name lists |
+| `accountConnectors` | `{}` | Bot ID to connector slug to `{allow, deny}` policy |
+| `servicePort` | `3487` | Local page service port |
+| `connectionSlug` | `magpie-ducoro` | Plugin model connection slug |
+| `modelCapabilityRefs` | `{}` | Manual model capability references |
+
+Gateway connections, complete skill packages, instruction blocks and explicit subagents use the existing sync modules. Hooks and RTK are not synchronized.
 
 ## License
 
 MIT
+
+## Additional 0.4.2 improvements
+
+Incremental feature scheduling, bounded file caching and read deduplication reduce repeated work. Model updates and account verification use bounded concurrency. Bot configuration plans support ongoing inheritance with explicit overrides. Diagnostics adds live step timing, model drift actions and selective configuration checkpoint restoration into drafts.
+
+Checkpoints capture desired plugin settings, not skill bodies or running sessions. Model restoration rechecks the reviewed configuration before writing. Unsupported content readback remains unverified. Synthetic benchmarks use simulated CLI latency and are not live-service performance claims.
+
+The new plan, progress, drift and checkpoint controls are localized in English and Chinese, including live statuses, dates, errors and accessibility labels. Switching the host language retains drafts and original resource names. Verification responses localize messages while preserving structured status codes.

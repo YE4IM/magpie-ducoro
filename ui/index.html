@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="language-pending">
+<html lang="zh-CN" class="language-pending">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8,15 +8,18 @@
   <!--SERVICE_TOKEN-->
   <script src="i18n.js"></script>
   <script src="service-bridge.js"></script>
+  <script src="plans.js" defer></script>
   <script src="model.js" defer></script>
   <script src="preview.js" defer></script>
   <script src="resources.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="reliability.js" defer></script>
+  <script src="control-center.js" defer></script>
 </head>
 <body>
   <main class="console">
     <header class="hero">
-      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.1</span></h1></div></div>
+      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.2</span></h1></div></div>
       <p>在一处管理连接、同步范围和每个 Bot 的资源。</p>
       <div class="connection-note"><span class="dot" aria-hidden="true"></span><span id="connection-state">正在读取插件配置…</span></div>
     </header>
@@ -46,6 +49,7 @@
           <label class="search-field"><span class="sr-only">搜索上游模型</span><input id="catalog-search" type="search" placeholder="搜索模型名称或供应商" autocomplete="off"></label>
           <p id="catalog-count" class="muted"></p><div id="catalog-list" class="catalog-list"></div>
         </details>
+        <details><summary>模型匹配依据与能力差异</summary><p>自动匹配先识别模型身份，再按官方供应商优先顺序选择参考；手动指定优先于自动匹配。参考只描述能力，不改变请求路由。</p><div id="model-explanations">正在读取匹配记录…</div></details>
         <datalist id="catalog-options"></datalist>
         <details class="manual-settings"><summary>手动指定能力参考 <span id="manual-count" class="summary-count">0 项覆盖</span></summary>
           <div class="card-heading manual-heading"><p>手动指定优先于自动匹配；移除映射即可恢复跟随上游。</p><button type="button" id="add-reference" class="secondary">＋ 添加映射</button></div>
@@ -68,6 +72,7 @@
       <section class="card">
         <div class="card-heading"><div><h2>Bot 列表</h2><p id="inventory-state">正在读取 Ducoro Bot 和资源…</p></div><button type="button" id="refresh-bots" class="secondary">刷新列表</button></div>
         <div id="inventory-message" class="notice" role="status" hidden></div>
+        <div class="bot-toolbar"><label>搜索 Bot<input id="bot-search" type="search" placeholder="名称或 Bot ID"></label><label>筛选<select id="bot-filter"><option value="all">全部</option><option value="changed">有修改</option><option value="failed">同步失败 / 待核实</option><option value="conflict">有权限冲突</option><option value="unavailable">模型不可用</option></select></label><button type="button" id="copy-bots" class="secondary">复制与批量分配</button><p id="bot-count" role="status"></p></div>
         <div id="assignments" class="rows"></div>
         <div id="assignment-empty" class="empty-state" hidden><span class="empty-icon" aria-hidden="true">◇</span><h3>尚无 Bot</h3><p>在 Ducoro 中创建 Bot 后刷新列表。</p></div>
       </section>
@@ -76,6 +81,8 @@
       <div class="section-title"><div><h2>同步结果，一目了然</h2><p>每次查看生成当前报告，或重试同步后再次查看。</p></div><span class="pill">实时诊断</span></div>
       <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>报告按需生成，仅在当前页面显示，不保存文件或累积历史。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
       <section class="card"><h2>管理记录恢复</h2><p>若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。</p><button type="button" id="retry-state" class="secondary">重新读取管理记录</button><p id="state-message" role="status"></p></section>
+      <section class="card"><div class="card-heading"><h2>逐项结果核验</h2><button type="button" id="verify-results" class="secondary">重新读取并核验</button></div><p>配置核验成功不代表运行中的会话已加载。超时后先读取核验，再决定是否重试。</p><div id="verification-results" role="status">尚未核验</div></section>
+      <section class="card"><h2>有效备份与恢复预览</h2><p>恢复管理记录前请核对备份内容。恢复不会直接写入 Bot，恢复完成后再手动同步。</p><button type="button" id="list-backups" class="secondary">查看有效备份</button><div id="backup-results" role="status"></div></section>
       <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
       <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步诊断或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
       <section id="report-view" hidden>

@@ -91,7 +91,7 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
       const selectedSubagents = (library.subagents ?? []).filter(x => enabled(x) &&
         (assigned(x) || (Array.isArray(opts.subagentNames) && opts.subagentNames.includes(x.name))))
       if (library.subagents != null && !Array.isArray(library.subagents)) throw Error('unrecognized subagents schema')
-      const active = instructionOn || (opts.syncSubagents && selectedSubagents.length)
+      const active = instructionOn || (opts.syncInstructions && Object.values(opts.botInstructions ?? {}).some(Boolean)) || (opts.syncSubagents && selectedSubagents.length)
       const hasOwned = Object.keys(owned.profiles).length || Object.keys(owned.files).length
       if (active || hasOwned) {
         const all = list(await call(['agent', 'list']))
@@ -123,7 +123,7 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
             if (record.id !== id || typeof record.profile !== 'string') throw Error('unrecognized Ducoro Bot record')
             const entry = owned.profiles[id]
             const previous = entry?.pending && record.profile.includes(entry.pending) ? entry.pending : entry?.block
-            const next = mergeInstructions(record.profile, previous, instructionOn && ids.has(id) ? instructionText : '')
+            const next = mergeInstructions(record.profile, previous, opts.syncInstructions && ids.has(id) ? [instructionOn ? instructionText : "", opts.botInstructions?.[id] ?? ""].filter(Boolean).join("\n\n") : '')
             if (record.profile !== next.profile) {
               // Save the intended block before the RPC. After a lost response,
               // either the old or new exact block is recognizable on retry.
@@ -136,7 +136,7 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
             await save()
           } catch (e) { problem(report, `instructions:${id}`, e.message) }
         }
-        report.features.instructions.status = instructionOn ? (instructionReady ? 'configured' : 'pending') : 'off'
+        report.features.instructions.status = (instructionOn || (opts.syncInstructions && Object.values(opts.botInstructions ?? {}).some(Boolean))) ? (instructionReady ? 'configured' : 'pending') : 'off'
         if ((opts.syncSubagents && selectedSubagents.length) || Object.keys(owned.files).length) {
           const home = await localHome()
           const wanted = new Map()

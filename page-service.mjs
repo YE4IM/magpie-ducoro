@@ -1,3 +1,5 @@
+import { createCheckpoint, checkpoints, rollbackDraft, inspectDrift, revision, projectOptions } from "./control-center.mjs";
+import "./ui/plans.js";
 import "./ui/i18n.js";
 const { translate, format, localizeReport, languageFor, message } =
   globalThis.DucoroI18n;
@@ -8,6 +10,10 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { readManagedState, stateBackups, previewStateBackup, restoreStateBackup } from "./state-store.mjs";
+import { deleteStateBackup } from "./state-store.mjs";
+import { verifyConfiguration } from "./verification.mjs";
+import { rm } from "node:fs/promises";
 import { validateOptions } from "./options.mjs";
 import { buildSyncPreview, detectCapabilities } from "./sync-preview.mjs";
 
@@ -159,6 +165,7 @@ export async function createPageService({
   run,
   trigger,
   getReport,
+  getProgress = () => ({ current: null, history: [] }),
   getModelCatalog,
   log = () => {},
   retryDelayMs = 500,
@@ -183,11 +190,14 @@ export async function createPageService({
       throw Error("Ducoro 暂不可用，或不支持此操作。请检查后台及账户状态。");
     return result.json;
   };
+  let verificationJob = null;
+  let capabilityFlight = null;
   let capabilityCache = null,
     capabilityTime = 0;
   const getCapabilities = async () => {
     if (!capabilityCache || Date.now() - capabilityTime > 30000) {
-      capabilityCache = await detectCapabilities(run);
+      capabilityFlight ??= detectCapabilities(run).finally(() => { capabilityFlight = null; });
+      capabilityCache = await capabilityFlight;
       capabilityTime = Date.now();
     }
     return capabilityCache;
@@ -207,6 +217,7 @@ export async function createPageService({
           error: translate(body.error, language),
           errorMessage: message(body.error),
         };
+      if (type.startsWith("application/json") && body?.rows) body = { ...body, rows: body.rows.map(row => typeof row.message === 'string' ? { ...row, message: translate(row.message, language), messageMessage: message(row.message) } : row) };
       res.writeHead(code, {
         "Content-Type": type,
         "Cache-Control": "no-store",
@@ -247,6 +258,51 @@ export async function createPageService({
         }
         if (req.headers["x-ducoro-token"] !== token)
           return reply(403, { error: "页面连接已更新，请重新读取页面" });
+        if (req.method === 'GET' && path === 'api/checkpoints') return reply(200, { checkpoints: await checkpoints(stateDir) });
+        if (req.method === 'GET' && path === 'api/drift') {
+          const loaded = await readManagedState(join(stateDir,'state.json'));
+          return reply(200, await inspectDrift({options,state:loaded.state,paths,run,signal:requestController.signal}));
+        }
+        if (req.method === 'POST' && ['api/checkpoints','api/rollback-preview'].includes(path)) {
+          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>512*1024)return reply(413,{error:'Request too large'});}
+          const value=JSON.parse(body);
+          if(path==='api/checkpoints') {
+            if(revision(projectOptions(value.before ?? {}))!==revision(projectOptions(options)))return reply(409,{error:'Configuration changed; reload before saving'});
+            return reply(200, {checkpoint:await createCheckpoint(stateDir,value.before,value.after)});
+          }
+          const result=await rollbackDraft(stateDir,value.id,value.selections,options);
+          const loaded=await readManagedState(join(stateDir,'state.json'));
+          const drift=await inspectDrift({options,state:loaded.state,paths,run,signal:requestController.signal});
+          // Model restoration requires a fresh, successful read of every affected Bot.
+          const next=globalThis.DucoroPlans.resolve(result.options),current=globalThis.DucoroPlans.resolve(options);
+          const affectsAll=result.changes.some(x=>['modelScope','connectionSlug','syncAgentModels'].includes(x.key));
+          const targets=new Set([...Object.keys(next.botModels??{}),...Object.keys(current.botModels??{})].filter(id=>next.botModels[id]!==current.botModels[id]));
+          if((affectsAll||targets.size) && (drift.unknown || [...targets].some(id=>!drift.rows.some(r=>r.feature==='models'&&r.target===id&&r.status==='same')) || (affectsAll&&drift.rows.some(r=>r.feature==='models'&&r.status!=='same'))))return reply(409,{error:'Current model configuration has changed or cannot be verified; resolve drift first'});
+          let source;try {source=JSON.parse(await readFile(paths.bridge,'utf8'));}catch{}
+          const fallback=typeof source?.model==='string'?source.model:source?.model?.id;
+          result.options.modelGuards ??= {};
+          for(const row of drift.rows.filter(row=>row.feature==='models' && row.revision && (affectsAll||targets.has(row.target)))) {
+            const model=next.modelScope==='agents' ? next.botModels?.[row.target]??fallback : fallback;
+            if(!model)return reply(409,{error:'Cannot verify the restoration model'});
+            result.options.modelGuards[row.target]={revision:row.revision,model};
+          }
+          return reply(200,result);
+        }
+        if (req.method === 'GET' && path === 'api/progress') return reply(200, getProgress());
+        if (path === 'api/verification-progress' && req.method === 'GET') return reply(200, verificationJob ?? { running: false, rows: [] });
+        if (path === 'api/verification-start' && req.method === 'POST') {
+          if (!verificationJob?.running) {
+            verificationJob = { running: true, rows: [], updatedAt: new Date().toISOString() };
+            void (async () => {
+              try {
+                const loaded = await readManagedState(join(stateDir,'state.json'));
+                const result = await verifyConfiguration({ options: globalThis.DucoroPlans.resolve(options), state: loaded.state, run, paths, report: await getReport(), onProgress: partial => { verificationJob = { ...verificationJob, ...partial }; } });
+                verificationJob = { ...result, running: false };
+              } catch { verificationJob = { running: false, rows: [], error: 'Verification unavailable' }; }
+            })();
+          }
+          return reply(200, verificationJob);
+        }
         if (req.method === "GET" && path === "api/inventory") {
           const [data, capabilities] = await Promise.all([
             inventory({
@@ -259,6 +315,30 @@ export async function createPageService({
             getCapabilities(),
           ]);
           return reply(200, { ...data, capabilities });
+        }
+        if (path === "api/verification" && ["GET", "POST"].includes(req.method)) {
+          const loaded = await readManagedState(join(stateDir, "state.json"));
+          return reply(200, await verifyConfiguration({ options: globalThis.DucoroPlans.resolve(options), state: loaded.state, run, paths, signal: requestController.signal, report: await getReport() }));
+        }
+        if (path === "api/state-backups" && req.method === "GET")
+          return reply(200, {backups: await stateBackups(join(stateDir,"state.json"))});
+        if (["api/state-backups/preview", "api/state-backups/restore", "api/state-backups/delete"].includes(path) && req.method === "POST") {
+          let body="";
+          for await(const chunk of req) {body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:"请求过大"});}
+          const {id,checksum}=JSON.parse(body);
+          const file=join(stateDir,"state.json");
+          if(path.endsWith("preview")) {
+            const {state,...preview}=await previewStateBackup(file,id);
+            return reply(200,preview);
+          }
+          // Share the writer lock with normal synchronization.
+          const lock=join(stateDir,"sync.lock");
+          try {await mkdir(lock);}catch {return reply(409,{error:"正在同步，请完成后再操作备份。"});}
+          try {
+            if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
+            await restoreStateBackup(file,id,checksum);
+          } finally {await rm(lock,{recursive:true,force:true});}
+          return reply(200,{restored:true});
         }
         if (req.method === "GET" && path === "api/report")
           return reply(200, localizeReport(await getReport(), language));
@@ -293,6 +373,9 @@ export async function createPageService({
             policyRows(await call(["agent", "connector", "list", id])),
           );
         }
+        if (req.method === 'POST' && path === 'api/retry-failed') {
+          trigger('page-retry-failed',0); return reply(200,{queued:true});
+        }
         if (req.method === "POST" && path === "api/retry") {
           trigger("page-retry", 0);
           return reply(200, { queued: true });
@@ -321,7 +404,7 @@ export async function createPageService({
               error: "设置格式无效，请检查分配和工具权限。",
             });
           if (path === "api/preview") {
-            const next = { ...options, ...value };
+            const next = globalThis.DucoroPlans.resolve({ ...options, ...value });
             const deadline = Date.now() + 40000;
             const signal = AbortSignal.any([
               requestController.signal,
@@ -337,9 +420,10 @@ export async function createPageService({
               200,
               await buildSyncPreview({
                 options: next,
-                currentOptions: options,
+                currentOptions: globalThis.DucoroPlans.resolve(options),
                 data,
                 stateDir,
+                paths,
                 run,
                 capabilities,
                 language,
@@ -365,6 +449,9 @@ export async function createPageService({
           "model.js",
           "service-bridge.js",
           "resources.js",
+          "reliability.js",
+          "plans.js",
+          "control-center.js",
           "preview.js",
           "i18n.js",
           "ducoro.svg",

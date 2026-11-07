@@ -174,3 +174,16 @@ html.language-pending body { visibility: hidden; }
   .resource-heading { flex-wrap: wrap; }
   .account-actions { flex-wrap: wrap; }
 }
+
+.bot-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:16px; margin:20px 0; }
+.bot-toolbar label { flex:1; min-width:180px; }
+.bot-toolbar p { width:100%; }
+.assignment-row[hidden] { display:none; }
+.preview-dialog > label { margin:12px 0; }
+
+.plan-targets { display:flex; flex-wrap:wrap; gap:12px; margin:16px 0; }
+.plan-targets label { display:flex; align-items:center; gap:8px; }
+.plan-targets input, .card details label input { width:auto; }
+.drift-row { padding:12px 0; border-bottom:1px solid var(--border, #ddd); }
+.drift-row button { margin:4px; }
+.card pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:240px; overflow:auto; }

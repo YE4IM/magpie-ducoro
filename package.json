@@ -1,7 +1,7 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.4.1",
-  "description": "Sync Magpie models, connectors and skills with Ducoro.",
+  "version": "0.4.2",
+  "description": "Sync Magpie models, connectors, skills and instructions with Ducoro.",
   "type": "module",
   "main": "./bridge.mjs",
   "keywords": [
@@ -57,7 +57,12 @@
       "botModels": {},
       "accountConnectors": {},
       "servicePort": 3487,
-      "accountResolutions": {}
+      "accountResolutions": {},
+      "botPlansCatalog": {},
+      "botPlans": {},
+      "botInstructions": {},
+      "pausedModels": [],
+      "modelGuards": {}
     },
     "page": {
       "title": "Ducoro",
@@ -92,7 +97,12 @@
     "state-store.mjs",
     "watch-fallback.mjs",
     "inventory-shapes.mjs",
-    "command-runner.mjs"
+    "command-runner.mjs",
+    "verification.mjs",
+    "content-preview.mjs",
+    "performance.mjs",
+    "file-cache.mjs",
+    "control-center.mjs"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs"

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+const preferenceRevision = value => createHash("sha256").update(JSON.stringify(value, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x)).digest("hex");
+import { mapLimit } from "./performance.mjs";
 // Reconcile Ducoro Bot addresses after a Magpie connection change. The wire
 // model remains Magpie's ID; catalog references describe capabilities only.
 const rows = value => Array.isArray(value) ? value : value?.agents ?? value?.bots
@@ -6,6 +9,7 @@ const sameRefs = (a, b) => Object.keys({ ...a, ...b }).every(key => a?.[key] ===
 
 export const modelTarget = (opts, id, fallback) => opts.modelScope === 'agents' ? (opts.botModels?.[id] ?? fallback) : fallback
 export const modelEligible = (opts, bot) => bot?.modelPreference?.connectionSlug === opts.connectionSlug && bot.modelPreference.runtime === 'pi-agent'
+  && !(opts.pausedModels ?? []).includes(bot.id)
   && (!Array.isArray(opts.targetAgents) || !opts.targetAgents.length || opts.targetAgents.includes(bot.id))
 
 export function compatiblePreference(preference, model, info) {
@@ -67,33 +71,39 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
       infos = route.availableModelInfos
     }
     let complete = true
-    for (const bot of bots) {
+    await mapLimit(bots, 4, async bot => {
       try {
         // The roster is only an index. Re-read the full preference so an
         // operator's recent route/control changes are not replaced by old data.
         const current = record(await call(['agent', 'get', bot.id]))
         if (current?.id !== bot.id) throw Error('unrecognized Ducoro Bot record')
-        if (!eligible(current)) continue
+        if (!eligible(current)) return
         const preference = current.modelPreference
         const model = modelTarget(opts,bot.id,target)
         if (models.length && !models.includes(model)) throw Error('assigned model unavailable; existing preference retained')
+        const guard = opts.modelGuards?.[bot.id]
+        if (guard?.model === model && preference.model !== model && preferenceRevision(preference) !== guard.revision) throw Error('Bot configuration changed after review; retained')
         const info = infos.find(info => info.id === model)
         if (!info) throw Error('effective model capabilities unavailable; Bot sync deferred')
         const next = compatiblePreference(preference, model, info)
-        if (JSON.stringify(next) === JSON.stringify(preference)) continue
+        if (JSON.stringify(next) === JSON.stringify(preference)) return
         await call(['agent', 'update', bot.id, '--patch', JSON.stringify({ modelPreference: next })])
         const verified = record(await call(['agent', 'get', bot.id]))
         if (verified?.id !== bot.id || !verified.modelPreference
           || Object.keys({ ...next, ...verified.modelPreference }).some(key => next[key] !== verified.modelPreference[key])) {
           throw Error('Bot model preference readback differs; reconciliation required')
         }
+        const state = getState()
+        state.modelApplied ??= {}
+        state.modelApplied[bot.id] = { model: next.model, updatedAt: new Date().toISOString() }
+        await save()
         log(`Bot ${bot.id} model synchronized: ${preference.model} -> ${model}${preference.thinkingLevel && !next.thinkingLevel ? ' (unsupported thinking override cleared)' : ''}`)
       } catch (error) {
         complete = false
         log(`Bot ${bot.id} model sync deferred: ${error.message}`)
         requestRetry('bot-model-sync')
       }
-    }
+    })
     if (complete && migration) {
       delete state.modelMigration
       await save()

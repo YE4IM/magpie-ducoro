@@ -1,5 +1,29 @@
 # 更新记录
 
+## 0.4.2 — 2026-11-07
+
+0.4.2 带来更高效的同步与更灵活的 Bot 配置管理。增量同步、技能缓存和并发核验减少重复处理；新增配置方案支持多个 Bot 持续继承与单项覆盖。同步进度、模型漂移检测、逐项核验和选择性配置回退，让每次变更更清晰、更可控。同时完善中英文界面，切换语言保留未保存草稿。升级可沿用现有设置与管理记录；配置核验结果不代表运行中的会话已加载更新。
+
+0.4.2 delivers more efficient synchronization and more flexible Bot configuration management. Incremental sync, skill caching, and concurrent verification reduce repeated work, while reusable configuration plans let multiple Bots inherit updates with individual overrides. Sync progress, model drift detection, item-level verification, and selective configuration restore make changes easier to understand and manage. Improved English and Chinese localization preserves unsaved drafts when switching languages. Existing settings and management records carry forward on upgrade; configuration verification does not confirm that running sessions have loaded the updates.
+
+- 补齐新增控制台的动态状态、漂移结果、检查点字段/日期、错误提示及无障碍标签国际化；核验接口按请求语言返回说明，保留结构化状态。新增双语切换与接口语言测试。
+
+- 追加按功能及技能来源增量同步、有界文件缓存、在途读取合并、模型并发更新与分步核验。
+- 新增持续继承的 Bot 配置方案、同步步骤与耗时、模型漂移处理和选择性配置检查点回退。
+- 保留账户撤销优先、写前冲突检查及未知结果读回；模型回退增加配置摘要保护。
+- 增加 10/50/100 Bot 模拟基准与并发、缓存、监听、检查点接口回归；相关操作与限制见 README。
+
+- 补齐英文国际化：界面跟随 Magpie 语言设置，切换保留草稿和弹窗；命令行默认英文，支持 `--lang en|zh`；补充英文说明与语言测试。
+- 备份列表新增单份删除与确认提示，删除后刷新列表；与同步共用锁，校验备份标识及内容，不修改当前管理记录。
+
+- 新增保存后逐项配置核验与重新读取结果入口。
+- 新增 Bot 搜索筛选、待保存计数、模型与资源分配批量复制。
+- 新增诊断处理入口、模型匹配解释与内容变化摘要。
+- 新增管理记录有效备份、恢复预览与恢复辅助。
+- 补充账户权限和本地页面服务回归验证；真实账户与 Magpie Web 代理仍需安装环境验收。
+
+# 更新记录
+
 ## 0.4.1 — 2026-11-07
 
 0.4.1 专注打磨现有功能，让同步更稳定、操作更顺畅。新版优化多 Bot 预览的并发读取、超时与取消处理，设置读取完成即可编辑；完善按钮忙碌状态、未保存草稿保护和同步结果反馈，刷新诊断时保留上一份结果。同时修复 Bot 资源卡片三列控件错位，完善自动跟随 Magpie 语言的中英文界面。升级可沿用现有设置与管理记录，无需重新配置。

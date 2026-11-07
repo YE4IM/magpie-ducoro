@@ -1,3 +1,6 @@
+import { readCachedFile, clearFileCache, fileMetrics } from "./file-cache.mjs"
+import "./ui/plans.js"
+import { createReadCoordinator, createProgress } from "./performance.mjs"
 // Ducoro connector bridge — the Bun main module of magpie-ducoro.
 //
 // Runs inside magpie's plugin host. Watches the three artifacts the Ducoro
@@ -24,7 +27,7 @@
 // This file must export exactly one plugin function (plus _internal helpers).
 
 import { createPageService } from "./page-service.mjs"
-import { readManagedState } from "./state-store.mjs"
+import { readManagedState, saveManagedState } from "./state-store.mjs"
 import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
 import { syncAccountConnectors } from "./account-connectors.mjs"
 import { createCommandRunner } from "./command-runner.mjs"
@@ -68,6 +71,7 @@ const DEFAULT_PATHS = {
 }
 
 export const DEFAULTS = {
+  botPlansCatalog: {}, botPlans: {}, botInstructions: {}, pausedModels: [], modelGuards: {},
   cli: "ducoro-cli",
   servicePort: 3487,
   modelScope: "global",
@@ -248,6 +252,9 @@ const createEngine = (input = {}, options = {}) => {
   merge(input?.magpie?.options)
   merge(input?.magpie?.option)
 
+  const rawOptions = structuredClone(opts)
+  if (!validateOptions(opts).length) Object.assign(opts, globalThis.DucoroPlans.resolve(opts))
+  const progress = createProgress()
   const dryRun = opts.dryRun === true || opts.dryRun === "true"
 
   const configDir = str(input?.directory) || str(input?.worktree) ||
@@ -319,17 +326,20 @@ const createEngine = (input = {}, options = {}) => {
     state = loaded.state
   }
 
-  const saveState = async () => {
+  let stateSaveQueue = Promise.resolve()
+  const saveState = () => {
+    const task = stateSaveQueue.then(async () => {
     if (dryRun) return
     try {
       await mkdir(stateDir, { recursive: true })
-      const temp = `${stateFile}.${process.pid}.tmp`
-      await writeFile(temp, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", mode: 0o600 })
-      await rename(temp, stateFile)
+      await saveManagedState(stateFile, state)
     } catch (e) {
       log("cannot save state:", e?.message ?? e)
       throw e
     }
+    })
+    stateSaveQueue = task.catch(() => {})
+    return task
   }
 
   // --------------------------------------------------------------- cli
@@ -338,7 +348,7 @@ const createEngine = (input = {}, options = {}) => {
   const gatewayAbortError = () => Object.assign(new Error("gateway sync superseded by a resource change"), { name: "AbortError", code: "GATEWAY_SUPERSEDED" })
   const interruptGatewayReads = () => activeGatewayController?.abort()
 
-  const run = createCommandRunner({opts,dryRun,rememberSecret,log,getGatewaySignal: () => activeGatewayController?.signal,gatewayAbortError})
+  const run = createReadCoordinator(createCommandRunner({opts,dryRun,rememberSecret,log,getGatewaySignal: () => activeGatewayController?.signal,gatewayAbortError}))
 
   const errMsg = (r) => {
     const j = r.json?.error?.message ?? r.json?.error?.code
@@ -872,7 +882,7 @@ const createEngine = (input = {}, options = {}) => {
   const activeSkillRoots = new Set()
   const skillBundleCache = new Map()
   let skillCacheGeneration = 0
-  const invalidateSkillCache = () => { skillCacheGeneration++; skillBundleCache.clear() }
+  const invalidateSkillCache = () => { skillCacheGeneration++; skillBundleCache.clear(); clearFileCache() }
 
   const readBundle = async (source) => {
     const root = await realpath(source)
@@ -898,10 +908,10 @@ const createEngine = (input = {}, options = {}) => {
     files.sort((a, b) => a.name.localeCompare(b.name))
     const manifest = files.find((f) => f.name === "SKILL.md")
     if (!manifest) throw new Error("SKILL.md missing")
-    const md = compatibleSkillMarkdown(await readFile(manifest.path, "utf8"), new Set(files.map((f) => f.name)))
+    const md = compatibleSkillMarkdown((await readCachedFile(manifest.path)).toString("utf8"), new Set(files.map((f) => f.name)))
     const hash = createHash("sha256")
     for (const f of files) {
-      const bytes = f.name === "SKILL.md" ? Buffer.from(md) : await readFile(f.path)
+      const bytes = f.name === "SKILL.md" ? Buffer.from(md) : await readCachedFile(f.path)
       hash.update(JSON.stringify([f.name, bytes.length, f.mode])).update(bytes)
     }
     return { files, md, hash: hash.digest("hex") }
@@ -1060,6 +1070,8 @@ const createEngine = (input = {}, options = {}) => {
     if (!bundles.size) return
     for (const scope of resourcePlan.skillScopes) {
       const sourceNames = new Set(selected(scopedLibrary(library, opts, "skills", scope).skills).map(item => str(item.name)))
+      if (roundSkillPaths && !Object.values(state.skills).some(row => row.scope === scope && row.replacement) &&
+          ![...bundles.values()].some(bundle => sourceNames.has(bundle.sourceName) && bundle.dir && [...roundSkillPaths].some(path => path === bundle.dir || path.startsWith(bundle.dir + '/') || bundle.dir.startsWith(path + '/')))) continue
       const existing = await skillNames(scope)
       if (!existing) continue
       for (const [id, mine] of Object.entries(state.skills)) {
@@ -1231,6 +1243,18 @@ const createEngine = (input = {}, options = {}) => {
     return plan
   }
 
+  let dirtySkillPaths = new Set()
+  let roundSkillPaths = null
+  let dirtyFeatures = new Set()
+  let roundFeatures = null
+  const wants = feature => !roundFeatures || roundFeatures.has(feature)
+  const classifyChange = path => {
+    if (path === paths.instructions) return ['total']
+    if (path === paths.mcp) return ['mcp']
+    if ([paths.bridge,paths.providers,paths.pluginProviders].includes(path)) return ['gateway']
+    if ([paths.skills,paths.librarySkills,...activeSkillRoots].some(root => path === root || path.startsWith(root + '/'))) return ['skills']
+    return ['all']
+  }
   const syncAllUnlocked = async (reason = "tick") => {
     forceMcpProbe = reason === "page-retry"
     try { await loadState() }
@@ -1240,7 +1264,7 @@ const createEngine = (input = {}, options = {}) => {
       requestRetry(error.code)
       return
     }
-    const invalidOptions = validateOptions(opts)
+    const invalidOptions = [...validateOptions(rawOptions), ...validateOptions(opts)]
     if (invalidOptions.length) {
       // Invalid access selections must never fall through to an inherited or
       // global resource plan. Diagnostics remain in memory for this round.
@@ -1269,26 +1293,26 @@ const createEngine = (input = {}, options = {}) => {
         }
       }
       // Revocations run before additions, large bundle reads, or gateway work.
-      try { if (resourcePlan) await pruneSkills(library) } catch (e) {
+      try { if (resourcePlan && wants("skills")) await progress.step("revoke-skills", () => pruneSkills(library)) } catch (e) {
         log("skill cleanup error:", e?.message ?? e)
         requestRetry("skill-cleanup")
       }
       try {
-        if (resourcePlan) {
-          await syncMcp(opts.syncMcp ? library : { ...library, mcp: [] })
+        if (resourcePlan && wants("mcp")) {
+          await progress.step("mcp", () => syncMcp(opts.syncMcp ? library : { ...library, mcp: [] }))
           diagnostics.stage("mcp", "configured", { targets: resourcePlan.mcpScopes, count: Object.keys(state.mcp).length })
         }
       } catch (e) {
         log("mcp sync error:", e?.message ?? e)
         requestRetry("mcp-sync")
       }
-      try { totalForRound = await syncTotal(library) } catch (e) {
+      try { if (wants("total")) totalForRound = await progress.step("instructions-subagents", () => syncTotal(library)) } catch (e) {
         log("Total sync error:", e?.message ?? e)
         requestRetry("total-sync")
       }
       try {
-        if (resourcePlan) {
-          await syncSkills(library)
+        if (resourcePlan && wants("skills")) {
+          await progress.step("skills", () => syncSkills(library))
           diagnostics.stage("skills", "configured", { targets: resourcePlan.skillScopes, count: Object.keys(state.skills).length })
         }
       } catch (e) {
@@ -1297,13 +1321,13 @@ const createEngine = (input = {}, options = {}) => {
       }
     }
     try {
-      await syncAccountConnectors({ options: opts, state, run, save: saveState })
+      if (wants("accounts")) await progress.step("accounts", () => syncAccountConnectors({ options: opts, state, run, save: saveState }))
     } catch (error) {
       log("account connector synchronization pending:", error.message)
       diagnostics.retry("account-connectors", ["mcp"])
       requestRetry("account-connectors")
     }
-    if (!stopped && (!watching || !pending)) await syncGateway(reason)
+    if (wants("gateway") && !stopped && (!watching || !pending)) await progress.step("models", () => syncGateway(reason))
   }
 
   // Magpie CLI commands start their own plugin hosts while the app's host
@@ -1313,7 +1337,7 @@ const createEngine = (input = {}, options = {}) => {
   const syncAll = async (reason = "tick") => {
     if (syncing || stopped) return false
     syncing = true
-    if (!watching || reason === "interval" || reason === "startup") invalidateSkillCache()
+    if (!watching || reason === "interval" || reason === "startup" || reason === "page-retry") invalidateSkillCache()
     const lock = join(stateDir, "sync.lock")
     let locked = false
     try {
@@ -1338,11 +1362,15 @@ const createEngine = (input = {}, options = {}) => {
         locked = true
         await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }))
       }
+      const changes = dirtyFeatures; dirtyFeatures = new Set()
+      const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
+      roundFeatures = ['file-change','coalesced','page-retry-failed'].includes(reason) && changes.size && !changes.has('all') ? changes : null
+      roundSkillPaths = roundFeatures && skillPaths.size ? skillPaths : null
       stateLoaded = false
       state = { v: 2, connection: null, mcp: {}, skills: {} }
+      progress.begin(reason, { ...run.metrics(), ...fileMetrics })
       diagnostics.begin(reason)
-      totalForRound = null
-      capabilitiesForRound = null
+      if (!roundFeatures) { totalForRound = null; capabilitiesForRound = null }
       try {
         await syncAllUnlocked(reason)
       } catch (error) {
@@ -1350,10 +1378,15 @@ const createEngine = (input = {}, options = {}) => {
         await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
         throw error
       }
+      if (pending) {
+        for (const feature of roundFeatures ?? ['all']) dirtyFeatures.add(feature)
+        for (const path of roundSkillPaths ?? []) dirtySkillPaths.add(path)
+      }
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
       if (locked) await rm(lock, { recursive: true, force: true })
+      progress.end({ ...run.metrics(), ...fileMetrics })
       syncing = false
       // Probing remote servers must not hold the mutation lock or delay a
       // subsequent Library event. Manual syncs still wait for their diagnostics.
@@ -1395,6 +1428,7 @@ const createEngine = (input = {}, options = {}) => {
   const watchers = new Map()
 
   const requestRetry = (reason) => {
+    progress.fail()
     // Diagnostics also cover manual one-shot runs, where no retry timer runs.
     // Total's per-resource report provides finer attribution than its shared
     // retry signal; use that report rather than marking both resources failed.
@@ -1413,6 +1447,13 @@ const createEngine = (input = {}, options = {}) => {
   // writes cannot postpone a user's selection indefinitely.
   const trigger = (reason = "file-change", delay = 75) => {
     if (!watching) return
+    if (reason === 'page-retry-failed') {
+      const map = {models:'gateway',connection:'gateway',mcp:'mcp',skills:'skills',instructions:'total',subagents:'total'}
+      const report = diagnostics.read({syncing,watchDegraded})
+      for(const [key,value] of Object.entries(report.features ?? {})) if(value.status==='pending') dirtyFeatures.add(map[key] ?? 'all')
+      if(report.issues?.some(issue => issue.code?.includes('account')))dirtyFeatures.add('accounts')
+      if(!dirtyFeatures.size)return
+    } else if (!["file-change","coalesced"].includes(reason)) dirtyFeatures.add("all")
     if (reason === "file-change" || reason === "watch-fallback") interruptGatewayReads()
     if (running) { pending = true; return }
     if (syncTimer) return
@@ -1497,7 +1538,16 @@ const createEngine = (input = {}, options = {}) => {
             const watcher = fsWatch(dir, { recursive: want.recursive }, (_event, filename) => {
               const name = filename == null ? null : String(filename).split(/[\\/]/)[0]
               if (!entry.recursive && name && !entry.names.has(name)) return
-              invalidateSkillCache()
+              const changedPath = filename == null ? dir : join(dir,String(filename))
+              if (_event === 'change' && Object.values(paths).some(path => dirname(path) === changedPath)) { void refreshWatches(); return }
+              const features = classifyChange(changedPath)
+              for (const feature of features) dirtyFeatures.add(feature)
+              if (features.includes('all')) invalidateSkillCache()
+              else if (features.includes('skills')) {
+                dirtySkillPaths.add(changedPath)
+                skillCacheGeneration++
+                for (const root of skillBundleCache.keys()) if (changedPath === root || changedPath.startsWith(root + '/') || root.startsWith(changedPath + '/')) skillBundleCache.delete(root)
+              }
               trigger("file-change")
               void refreshWatches()
             })
@@ -1525,11 +1575,14 @@ const createEngine = (input = {}, options = {}) => {
     if (watching) return
     const generation = ++lifecycleGeneration
     stopped = false
+    // Watch callbacks use canonical directories; source paths must use the same
+    // spelling (macOS /var and /private/var otherwise classify every event as full).
+    for (const [key,path] of Object.entries(paths)) paths[key] = await realpath(path).catch(async () => join(await realpath(dirname(path)).catch(() => dirname(path)),basename(path)))
     watching = true
     if (!dryRun) await removeLegacyReports(stateDir)
-    if (!dryRun) pageService = await createPageService({ options: opts, paths, stateDir, run, trigger,
-      getReport: () => diagnostics.read({ syncing, watchDegraded }),
-      getModelCatalog: force => capabilityCatalog.snapshot(force), log })
+    if (!dryRun) pageService = await createPageService({ options: rawOptions, paths, stateDir, run, trigger, getProgress: () => progress.read(),
+    getReport: () => diagnostics.read({ syncing, watchDegraded }),
+      getModelCatalog: async force => ({ ...(await capabilityCatalog.snapshot(force)), entries: (capabilitiesForRound?.entries ?? []).map(({id,status,source,reference,commonCapabilities,warnings}) => ({id,status,source,reference,commonCapabilities,warnings})) }), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)
@@ -1586,6 +1639,7 @@ const createEngine = (input = {}, options = {}) => {
 
   return {
     opts, paths, stateFile, start, stop, syncAll, trigger, drainMcpProbes,
+    getProgress: () => progress.read(),
     getReport: () => diagnostics.read({ syncing, watchDegraded }),
     get state() { return state },
     get currentResourceTargets() { return resourcePlan ? [...resourcePlan.targets] : null },

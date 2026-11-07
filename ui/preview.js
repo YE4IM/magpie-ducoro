@@ -15,8 +15,10 @@
       block.append(table,el('p',status[row.model.status],'muted'))
     }
     for(const item of row.resources) {
-      const name=item.kind==='skills'?t('技能'):t('资源库连接器')
-      block.append(el('p',item.action==='effective'?t`${name} · 预计获得：${names(item.gained)}；预计失去插件提供的资源：${names(item.lost)}`:t`${name} · ${actions[item.action]} · ${item.name}`))
+      const name=t(({skills:'技能',instructions:'指令',subagents:'子代理'})[item.kind]??'资源库连接器')
+      const resourceName=item.nameMessage?t(item.nameMessage):item.name
+      block.append(el('p',item.action==='effective'?t`${name} · 预计获得：${names(item.gained)}；预计失去插件提供的资源：${names(item.lost)}`:t`${name} · ${actions[item.action]??t('待核实')} · ${resourceName}`))
+      if(item.summaryMessage||item.summary)block.append(el('p',t(item.summaryMessage??item.summary),'muted'))
     }
     for(const item of row.accounts) {
       const section=el('div',undefined,item.action==='conflict'?'notice error':'account-diff')

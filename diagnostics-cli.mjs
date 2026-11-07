@@ -5,14 +5,18 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { realpath } from 'node:fs/promises'
 import './ui/i18n.js'
-const t = (strings, ...values) => String(globalThis.DucoroI18n.t(strings, ...values))
+const translator = language => (strings, ...values) => {
+  if (typeof strings === 'string') return globalThis.DucoroI18n.translate(strings, language);
+  const key = strings.reduce((out, part, i) => out + part + (i < values.length ? `{${i}}` : ''), '');
+  return globalThis.DucoroI18n.format(key, values, language);
+}
 import { readDiagnostics, defaultStateDir } from './diagnostics.mjs'
 
-const LABELS = { connection: t('连接'), models: t('Bot 模型'), mcp: 'MCP', skills: t('技能'), instructions: t('指令'), subagents: t('子代理') }
-const STATUS = { configured: t('配置已对账'), pending: t('待处理'), disabled: t('已关闭'), skipped: t('本轮未配置'), unknown: t('未知') }
-
-export function formatDiagnostics(report) {
-  report = globalThis.DucoroI18n.localizeReport(report, 'en')
+export function formatDiagnostics(report, language = 'en') {
+  const t = translator(language);
+  const LABELS = { connection: t('连接'), models: t('Bot 模型'), mcp: 'MCP', skills: t('技能'), instructions: t('指令'), subagents: t('子代理') };
+  const STATUS = { configured: t('配置已对账'), pending: t('待处理'), disabled: t('已关闭'), skipped: t('本轮未配置'), unknown: t('未知') };
+  report = globalThis.DucoroI18n.localizeReport(report, language);
   const lines = [t`Ducoro 同步诊断 · ${report.pluginVersion}`, t`查看时间：${report.updatedAt}`, t`最近同步：${report.lastSyncedAt || t('尚未完成同步')}${report.stale ? t('（同步结果待更新）') : ''}`, t('报告按需生成，不保存本地文件。'), t`整体：${STATUS[report.status] || t('未知')}`, t('会话加载状态：未知；保存配置不代表运行中的会话已加载。'), '']
   for (const [feature, row] of Object.entries(report.features)) lines.push(`${LABELS[feature]}: ${row.skipReason === 'not-selected' ? t('未选择资源') : STATUS[row.status]}${row.count === undefined ? '' : t` · ${row.count} 项`}${row.targets.length ? ` · ${row.targets.join(', ')}` : ''}`)
   const seen = new Set()
@@ -26,7 +30,8 @@ export function formatDiagnostics(report) {
   return lines.filter((line, i, all) => line || all[i - 1] !== '').join('\n')
 }
 
-export async function checkDaemon({ cli = 'ducoro-cli', timeoutMs = 5000 } = {}) {
+export async function checkDaemon({ cli = 'ducoro-cli', timeoutMs = 5000, language = 'en' } = {}) {
+  const t = translator(language);
   return new Promise(resolve => {
     let settled = false
     let stdout = ''
@@ -51,29 +56,34 @@ export async function checkDaemon({ cli = 'ducoro-cli', timeoutMs = 5000 } = {})
 }
 
 export async function main(args = process.argv.slice(2), { output = text => process.stdout.write(text), errorOutput = text => process.stderr.write(text) } = {}) {
+  const languageIndex = args.lastIndexOf('--lang');
+  const language = languageIndex < 0 ? 'en' : args[languageIndex + 1];
+  if (!['en', 'zh'].includes(language)) { errorOutput('Invalid language / 语言无效: --lang en|zh\n'); return 2; }
+  const t = translator(language);
   let json = false, doctor = false, port = 3487, stateDir = defaultStateDir(), cli = 'ducoro-cli'
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
+    if (arg === '--lang') { i++; continue; }
     if (arg === '--help' || arg === '-h') {
-      output('Usage: node diagnostics-cli.mjs [--json] [--state-dir <directory>] [--port <port>] [--doctor] [--cli <path>]\nGenerate a read-only live report from the running plugin. No report files are saved. --doctor additionally reads ducoro-cli info; never runs an LLM or modifies configuration.\n')
+      output(language === 'zh' ? '用法：node diagnostics-cli.mjs [--lang en|zh] [--json] [--state-dir <directory>] [--port <port>] [--doctor] [--cli <path>]\n只读实时报告；--doctor 仅检查后台状态，不写入配置。\n' : 'Usage: node diagnostics-cli.mjs [--lang en|zh] [--json] [--state-dir <directory>] [--port <port>] [--doctor] [--cli <path>]\nRead-only live report. --doctor checks daemon status without changing configuration.\n')
       return 0
     }
     if (arg === '--json') json = true
     else if (arg === '--doctor') doctor = true
     else if (arg === '--state-dir' || arg === '--cli' || arg === '--port') {
       const value = args[++i]
-      if (!value || value.startsWith('--')) { errorOutput('Missing option value. Use --help.\n'); return 2 }
+      if (!value || value.startsWith('--')) { errorOutput((language === 'zh' ? '缺少选项值，请使用 --help 查看帮助。' : 'Missing option value. Use --help.') + '\n'); return 2 }
       if (arg === '--state-dir') stateDir = value
       else if (arg === '--port') {
         port = Number(value)
-        if (!Number.isInteger(port) || port < 1024 || port > 65535) { errorOutput('Invalid service port. Use --help.\n'); return 2 }
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) { errorOutput((language === 'zh' ? '服务端口无效，请使用 --help 查看帮助。' : 'Invalid service port. Use --help.') + '\n'); return 2 }
       }
       else cli = value
-    } else { errorOutput('Unknown option. Use --help.\n'); return 2 }
+    } else { errorOutput((language === 'zh' ? '未知选项，请使用 --help 查看帮助。' : 'Unknown option. Use --help.') + '\n'); return 2 }
   }
-  const report = await readDiagnostics({ stateDir, port })
-  if (doctor) report.doctor = await checkDaemon({ cli })
-  output(json ? JSON.stringify(report, null, 2) + '\n' : formatDiagnostics(report) + '\n')
+  const report = globalThis.DucoroI18n.localizeReport(await readDiagnostics({ stateDir, port }), language)
+  if (doctor) report.doctor = await checkDaemon({ cli, language })
+  output(json ? JSON.stringify(report, null, 2) + '\n' : formatDiagnostics(report, language) + '\n')
   return report.stale || report.status === 'pending' || report.status === 'unknown' || report.doctor?.status === 'unavailable' ? 2 : 0
 }
 
