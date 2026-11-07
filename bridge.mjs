@@ -24,6 +24,8 @@
 // This file must export exactly one plugin function (plus _internal helpers).
 
 import { createPageService } from "./page-service.mjs"
+import { readManagedState } from "./state-store.mjs"
+import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
 import { syncAccountConnectors } from "./account-connectors.mjs"
 import { spawn as nodeSpawn } from "node:child_process"
 import { watch as fsWatch } from "node:fs"
@@ -71,6 +73,7 @@ export const DEFAULTS = {
   modelScope: "global",
   botModels: {},
   accountConnectors: {},
+  accountResolutions: {},
   connectionSlug: "magpie-ducoro",
   connectionName: "Magpie gateway",
   syncConnection: true,
@@ -312,21 +315,8 @@ const createEngine = (input = {}, options = {}) => {
   const loadState = async () => {
     if (stateLoaded) return
     stateLoaded = true
-    try {
-      const raw = JSON.parse(await readFile(stateFile, "utf8"))
-      if (raw && typeof raw === "object" && (raw.v === 1 || raw.v === 2)) {
-        state = {
-          v: 2,
-          connection: raw.connection ?? null,
-          modelMigration: raw.modelMigration ?? null,
-          modelCapabilities: raw.modelCapabilities ?? null,
-          mcp: raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {},
-          total: raw.total,
-          accountConnectors: raw.accountConnectors ?? {},
-          skills: raw.skills && typeof raw.skills === "object" ? raw.skills : {},
-        }
-      }
-    } catch {}
+    const loaded = await readManagedState(stateFile)
+    state = loaded.state
   }
 
   const saveState = async () => {
@@ -1326,7 +1316,13 @@ const createEngine = (input = {}, options = {}) => {
 
   const syncAllUnlocked = async (reason = "tick") => {
     forceMcpProbe = reason === "page-retry"
-    await loadState()
+    try { await loadState() }
+    catch (error) {
+      diagnostics.retry(error.code)
+      log(error.message)
+      requestRetry(error.code)
+      return
+    }
     const invalidOptions = validateOptions(opts)
     if (invalidOptions.length) {
       // Invalid access selections must never fall through to an inherited or
@@ -1594,15 +1590,15 @@ const createEngine = (input = {}, options = {}) => {
               warnOnce(`watch:${dir}:${error?.code}`, `watch error (${error?.code ?? "unknown"}): ${dir}; using short reconciliation fallback`)
               watcher.close()
               if (watchers.get(dir) === entry) watchers.delete(dir)
-              requestRetry("watch-error")
+              diagnostics.retry("watch-error")
             })
             watchers.set(dir, entry)
-          } catch { watchDegraded = true; requestRetry("watch-missing") }
+          } catch { watchDegraded = true; diagnostics.retry("watch-missing") }
         }
       } while (refreshAgain && watching)
     })().catch((e) => {
       log("watch refresh failed:", e?.message ?? e)
-      requestRetry("watch-refresh")
+      diagnostics.retry("watch-refresh")
     }).finally(() => { refreshPromise = null })
     return refreshPromise
   }
@@ -1615,19 +1611,31 @@ const createEngine = (input = {}, options = {}) => {
     watching = true
     if (!dryRun) await removeLegacyReports(stateDir)
     if (!dryRun) pageService = await createPageService({ options: opts, paths, stateDir, run, trigger,
-      getReport: () => diagnostics.read({ syncing }),
+      getReport: () => diagnostics.read({ syncing, watchDegraded }),
       getModelCatalog: force => capabilityCatalog.snapshot(force), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)
     // Watch failures (OS limits, unsupported recursive watch) must not silently
     // turn resource changes into a two-minute wait. This path is normally idle.
-    watchFallback = setInterval(() => {
-      if (!watchDegraded) return
-      invalidateSkillCache()
-      void refreshWatches()
-      trigger("watch-fallback", 0)
-    }, 500)
+    let fallbackRequired = false
+    const poll = createFallbackPoll({
+      fingerprint: () => sourceFingerprint([paths.bridge,paths.mcp,paths.library,paths.instructions,paths.providers,paths.pluginProviders,paths.skills,paths.librarySkills,...activeSkillRoots]),
+      refresh: () => refreshWatches(),
+      changed: () => { if (fallbackRequired) { invalidateSkillCache(); trigger("watch-fallback", 0) } },
+    })
+    await poll()
+    if (!watching || generation !== lifecycleGeneration) return
+    const checkFallback = async () => {
+      if (!watching || generation !== lifecycleGeneration) return
+      let delay = 1000
+      try { fallbackRequired = watchDegraded; delay = await poll() } catch { /* Next scan retries without interrupting gateway reads. */ }
+      if (watching && generation === lifecycleGeneration) {
+        watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 30000)
+        watchFallback.unref?.()
+      }
+    }
+    watchFallback = setTimeout(checkFallback, 1000)
     watchFallback.unref?.()
     interval = setInterval(() => {
       void refreshWatches()
@@ -1650,7 +1658,7 @@ const createEngine = (input = {}, options = {}) => {
     clearTimeout(syncTimer)
     clearTimeout(retryTimer)
     clearInterval(interval)
-    clearInterval(watchFallback)
+    clearTimeout(watchFallback)
     syncTimer = retryTimer = interval = null
     for (const { watcher } of watchers.values()) watcher.close()
     watchers.clear()
@@ -1661,7 +1669,7 @@ const createEngine = (input = {}, options = {}) => {
 
   return {
     opts, paths, stateFile, start, stop, syncAll, trigger, drainMcpProbes,
-    getReport: () => diagnostics.read({ syncing }),
+    getReport: () => diagnostics.read({ syncing, watchDegraded }),
     get state() { return state },
     get currentResourceTargets() { return resourcePlan ? [...resourcePlan.targets] : null },
     get watchedPaths() { return [...watchers.keys()] },

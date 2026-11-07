@@ -4,6 +4,10 @@ const rows = value => Array.isArray(value) ? value : value?.agents ?? value?.bot
 const record = value => value?.agent ?? value
 const sameRefs = (a, b) => Object.keys({ ...a, ...b }).every(key => a?.[key] === b?.[key])
 
+export const modelTarget = (opts, id, fallback) => opts.modelScope === 'agents' ? (opts.botModels?.[id] ?? fallback) : fallback
+export const modelEligible = (opts, bot) => bot?.modelPreference?.connectionSlug === opts.connectionSlug && bot.modelPreference.runtime === 'pi-agent'
+  && (!Array.isArray(opts.targetAgents) || !opts.targetAgents.length || opts.targetAgents.includes(bot.id))
+
 export function compatiblePreference(preference, model, info) {
   const next = { ...preference, model }
   const capability = info?.thinkingCapability
@@ -47,8 +51,7 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
     const migration = state.modelMigration?.slug === slug && state.modelMigration.target === target ? state.modelMigration : null
     const all = rows(await call(['agent', 'list']))
     if (!Array.isArray(all)) throw Error('unrecognized Ducoro Bot list response')
-    const eligible = bot => bot?.modelPreference?.connectionSlug === slug && bot.modelPreference.runtime === 'pi-agent'
-      && (!Array.isArray(opts.targetAgents) || !opts.targetAgents.length || opts.targetAgents.includes(bot.id))
+    const eligible = bot => modelEligible({...opts,connectionSlug:slug},bot)
     const bots = all.filter(eligible)
     onStatus('unknown', { targets: bots.map(bot => bot.id), count: bots.length })
     let infos = []
@@ -72,7 +75,7 @@ export function createModelSync({ opts, run, getState, save, requestRetry, log, 
         if (current?.id !== bot.id) throw Error('unrecognized Ducoro Bot record')
         if (!eligible(current)) continue
         const preference = current.modelPreference
-        const model = opts.modelScope === 'agents' ? (opts.botModels?.[bot.id] ?? target) : target
+        const model = modelTarget(opts,bot.id,target)
         if (models.length && !models.includes(model)) throw Error('assigned model unavailable; existing preference retained')
         const info = infos.find(info => info.id === model)
         if (!info) throw Error('effective model capabilities unavailable; Bot sync deferred')

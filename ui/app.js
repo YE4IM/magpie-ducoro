@@ -107,9 +107,9 @@ async function refreshCatalog(force = false) {
   DucoroI18n.setText($('sync-catalog'), force ? t('正在同步…') : t('正在读取…'))
   try {
     const result = await ducoroApi('model-catalog', force ? {} : undefined)
-    if (!Array.isArray(result.models) || !Number.isFinite(Date.parse(result.updatedAt))) throw Error(t('上游模型目录格式无法识别。'))
+    if (!Array.isArray(result.models) || !Number.isFinite(Date.parse(result.updatedAt))) throw DucoroI18n.error(t('上游模型目录格式无法识别。'))
     catalogModels = result.models
-    DucoroI18n.setText($('catalog-state'), t`${catalogModels.length} 个模型 · 最近读取 ${new Date(result.updatedAt).toLocaleString(document.documentElement.lang)}`)
+    DucoroI18n.setText($('catalog-state'), t`${catalogModels.length} 个模型 · 最近读取 ${DucoroI18n.dateTime(result.updatedAt)}`)
     $('catalog-options').replaceChildren()
     for (const model of catalogModels) {
       const option = node('option')
@@ -121,7 +121,7 @@ async function refreshCatalog(force = false) {
     message(result.stale ? t('上游暂不可用，正在显示上次成功读取的目录。请稍后重新同步。') : force ? t('已重新读取 Ducoro 上游目录，并请求重新匹配模型能力。手动覆盖和未保存设置已保留。') : '', result.stale === true, 'catalog-message')
   } catch (error) {
     DucoroI18n.setText($('catalog-state'), catalogModels.length ? t`${catalogModels.length} 个模型 · 本次更新失败，显示上次目录` : t('上游目录暂不可用'))
-    message(error.message, true, 'catalog-message')
+    message(error.localizedMessage??error.message, true, 'catalog-message')
   } finally {
     catalogBusy = false
     DucoroI18n.setText($('sync-catalog'), t('↻ 同步上游模型列表'))
@@ -174,7 +174,7 @@ function collect() {
   for (const row of $('references').children) {
     const route = row.querySelector('.ref-route').value.trim()
     const ref = row.querySelector('.ref-disabled').checked ? null : row.querySelector('.ref-value').value.trim()
-    if (Object.hasOwn(options.modelCapabilityRefs, route)) throw Error(t`模型 ${route || t('（空名称）')} 重复，请仅保留一条映射。`)
+    if (Object.hasOwn(options.modelCapabilityRefs, route)) throw DucoroI18n.error(t`模型 ${route || t('（空名称）')} 重复，请仅保留一条映射。`)
     Object.defineProperty(options.modelCapabilityRefs, route, { value: ref, enumerable: true, configurable: true, writable: true })
   }
   Object.assign(options, DucoroResources.collect())
@@ -214,7 +214,7 @@ async function load() {
     message('')
     if (!panel) { await Promise.all([DucoroResources.refresh(), refreshCatalog()]); if (!$('diagnostics').hidden) await refreshReport() }
   } catch (error) {
-    message(t`无法读取设置：${error.message}`, true)
+    message(t`无法读取设置：${error.localizedMessage??error.message}`, true)
     DucoroI18n.setText($('connection-state'), t('配置尚未读取，未执行任何修改'))
     DucoroI18n.setText($('dirty-state'), t('读取失败'))
   } finally {
@@ -231,21 +231,26 @@ async function save() {
     const { options, changed } = mergeEditedOptions(current, baseline, edited, panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS)
     if (!changed.length) { message(t('没有需要保存的修改。')); return }
     if (!panel) await ducoroApi('validate',options)
+    if (!panel) {
+      if (!await DucoroPreview.show(options,{save:true})) return
+      const latest = await globalThis.magpie.options.get() ?? {}
+      if (JSON.stringify(latest) !== JSON.stringify(current)) throw DucoroI18n.error(t('配置在预览期间已变化，请重新读取并再次预览。'))
+    }
     const saved = await globalThis.magpie.options.set(options)
     baseline = optionsForDisplay(saved ?? options)
     populate(baseline)
     message(t('设置已保存，正在同步。稍后刷新报告可查看结果。'))
     if (!panel) setTimeout(async () => { await DucoroResources.refresh(); await refreshReport() }, 3000)
   } catch (error) {
-    message(error.message || t('保存失败，请重试。'), true)
+    message(error.localizedMessage??(error.message || t('保存失败，请重试。')), true)
   } finally { setBusy(false) }
 }
 
 function showReport(report) {
   $('report-empty').hidden = true
   $('report-view').hidden = false
-  const date = report.updatedAt ? new Date(report.updatedAt).toLocaleString(document.documentElement.lang) : t('报告未提供时间')
-  const synced = report.lastSyncedAt ? new Date(report.lastSyncedAt).toLocaleString(document.documentElement.lang) : t('尚未完成同步')
+  const date = report.updatedAt ? DucoroI18n.dateTime(report.updatedAt) : t('报告未提供时间')
+  const synced = report.lastSyncedAt ? DucoroI18n.dateTime(report.lastSyncedAt) : t('尚未完成同步')
   DucoroI18n.setText($('report-time'), t`查看时间：${date} · 最近同步：${synced}${report.stale ? t(' · 同步结果待更新') : ''}`)
   $('report-cards').replaceChildren()
   for (const [key, title] of Object.entries(FEATURE_NAMES)) {
@@ -255,7 +260,7 @@ function showReport(report) {
     card.append(node('h3', title), status)
     if (item.count !== null) card.append(node('p', t`${item.count} 个记录条目`))
     if (key === 'mcp') card.append(node('p', { passed: t('服务探测通过'), failed: t('服务探测未通过'), unknown: t('服务探测未确认') }[item.probeStatus]))
-    if (item.targets.length) card.append(node('p', t`目标：${item.targets.join(document.documentElement.lang === 'en' ? ', ' : '、')}`))
+    if (item.targets.length) card.append(node('p', t`目标：${DucoroI18n.joinMessages(item.targets)}`))
     $('report-cards').append(card)
   }
   $('report-issues').replaceChildren()
@@ -264,7 +269,7 @@ function showReport(report) {
     const el = node('article', undefined, 'issue')
     el.append(node('strong', FEATURE_NAMES[issue.feature] ?? t('同步诊断')), node('p', t(issue.message)))
     if (issue.nextAction) el.append(node('p', t`建议：${t(issue.nextAction)}`))
-    if (issue.targets.length) el.append(node('p', t`受影响 Bot：${issue.targets.join(document.documentElement.lang === 'en' ? ', ' : '、')}`))
+    if (issue.targets.length) el.append(node('p', t`受影响 Bot：${DucoroI18n.joinMessages(issue.targets)}`))
     $('report-issues').append(el)
   }
   message(t`${report.syncing ? t('正在同步，当前显示最近已完成的结果。') : t('已生成本次诊断报告。')}报告仅在页面中显示，不保存到本机。`, false, 'report-message')
@@ -284,7 +289,7 @@ async function refreshReport() {
   } catch(error) {
     if (request === reportRequest) {
       $('report-empty').hidden = false
-      message(error.message, true, 'report-message')
+      message(error.localizedMessage??error.message, true, 'report-message')
     }
   } finally { if (request === reportRequest) $('refresh-report').disabled = busy || !ready }
 }
@@ -308,8 +313,16 @@ if (!panel) {
   })
   $('sync-catalog').addEventListener('click', () => refreshCatalog(true))
   $('catalog-search').addEventListener('input', renderCatalog)
+  $('preview').addEventListener('click',async () => {
+    try { const edited=validateFields(collect());setBusy(true);await DucoroPreview.show(edited) }
+    catch(error){message(error.localizedMessage??error.message,true)} finally{setBusy(false)}
+  })
+  $('retry-state').addEventListener('click',async () => {
+    try { await ducoroApi('retry',{});DucoroI18n.setText($('state-message'),t('已请求重新读取。请稍后重新查看诊断报告；文件仍不可读时会继续暂停同步。')) }
+    catch(error){DucoroI18n.setText($('state-message'),t(error.localizedMessage??error.message))}
+  })
   $('refresh-report').addEventListener('click',refreshReport)
-  $('retry-sync').addEventListener('click',async () => { try { await ducoroApi('retry',{}); message(t('已请求重新同步，请稍后刷新报告。'),false,'report-message') } catch(error) { message(error.message,true,'report-message') } })
+  $('retry-sync').addEventListener('click',async () => { try { await ducoroApi('retry',{}); message(t('已请求重新同步，请稍后刷新报告。'),false,'report-message') } catch(error) { message(error.localizedMessage??error.message,true,'report-message') } })
 }
 
 if (!globalThis.magpie?.ready || !globalThis.magpie?.options) {
@@ -322,14 +335,14 @@ if (!globalThis.magpie?.ready || !globalThis.magpie?.options) {
     if (!panel && typeof globalThis.magpie.onAction === 'function') globalThis.magpie.onAction(action => { if (action.id === 'diagnostics') setTab('diagnostics') })
     await load()
   } catch (error) {
-    message(t`Magpie 页面接口暂不可用：${error.message}`, true)
+    message(t`Magpie 页面接口暂不可用：${error.localizedMessage??error.message}`, true)
     DucoroI18n.setText($('connection-state'), t('页面接口未就绪'))
   }
 }
 
 })().catch(error => {
   const el = document.getElementById('message')
-  if (el) { el.hidden = false; el.classList.add('error'); DucoroI18n.setText(el, t`页面暂不可用：${error.message}`) }
+  if (el) { el.hidden = false; el.classList.add('error'); DucoroI18n.setText(el, t`页面暂不可用：${error.localizedMessage??error.message}`) }
 })
 
 }

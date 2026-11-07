@@ -9,13 +9,14 @@
   <script src="i18n.js"></script>
   <script src="service-bridge.js"></script>
   <script src="model.js" defer></script>
+  <script src="preview.js" defer></script>
   <script src="resources.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <main class="console">
     <header class="hero">
-      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.3.5</span></h1></div></div>
+      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.0</span></h1></div></div>
       <p>在一处管理连接、同步范围和每个 Bot 的资源。</p>
       <div class="connection-note"><span class="dot" aria-hidden="true"></span><span id="connection-state">正在读取插件配置…</span></div>
     </header>
@@ -74,6 +75,7 @@
     <section id="diagnostics" class="tab-content" hidden>
       <div class="section-title"><div><h2>同步结果，一目了然</h2><p>每次查看生成当前报告，或重试同步后再次查看。</p></div><span class="pill">实时诊断</span></div>
       <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>报告按需生成，仅在当前页面显示，不保存文件或累积历史。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
+      <section class="card"><h2>管理记录恢复</h2><p>若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。</p><button type="button" id="retry-state" class="secondary">重新读取管理记录</button><p id="state-message" role="status"></p></section>
       <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
       <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步诊断或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
       <section id="report-view" hidden>
@@ -83,7 +85,7 @@
         <p class="footnote">报告说明配置层的同步情况。除非报告明确验证，否则不代表运行中的会话已加载新的工具、技能或子代理。</p>
       </section>
     </section>
-    <footer id="save-bar" class="save-bar"><span id="dirty-state">正在加载…</span><div><button type="button" id="reload" class="secondary" disabled>重新读取</button><button type="button" id="save" class="primary" disabled>保存设置</button></div></footer>
+    <footer id="save-bar" class="save-bar"><span id="dirty-state">正在加载…</span><div><button type="button" id="reload" class="secondary" disabled>重新读取</button><button type="button" id="preview" class="secondary" disabled>预览变化</button><button type="button" id="save" class="primary" disabled>保存设置</button></div></footer>
   </main>
 </body>
 </html>

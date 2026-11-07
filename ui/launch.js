@@ -9,6 +9,7 @@ const { t } = globalThis.DucoroI18n;
       const port = Number(options.servicePort) || 3487
       location.replace(magpie.service ? new URL(magpie.service, location.href).href : `http://127.0.0.1:${port}/`)
     } catch {
+      DucoroI18n.applyDocument(document.documentElement.lang)
       DucoroI18n.setText(document.getElementById('launch-state'), t('Ducoro 页面未就绪，请重新打开。'))
       document.getElementById('launch-retry').hidden = false
     }

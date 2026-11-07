@@ -6,7 +6,7 @@ const { t } = globalThis.DucoroI18n;
   const requests = new Map(), actions = [], handlers = new Set()
   const call = (method, params) => new Promise((resolve,reject) => {
     const id = ++seq
-    const timer = setTimeout(() => { requests.delete(id); reject(Error(t('请从 Magpie 打开此页面，或重新读取。'))) },10000)
+    const timer = setTimeout(() => { requests.delete(id); reject(DucoroI18n.error(t('请从 Magpie 打开此页面，或重新读取。'))) },10000)
     requests.set(id,{resolve,reject,timer})
     parent.postMessage({magpie:1,id,method,params},'*')
   })
@@ -46,13 +46,16 @@ const { t } = globalThis.DucoroI18n;
       } catch {
         // Reloading plugin settings briefly replaces the host. Retry reads
         // only: mutations must never be replayed after an unknown outcome.
-        if (body !== undefined || attempt >= 2) throw Error(t('暂时无法连接 Ducoro 插件页面服务。请稍后重试；若持续失败，请在 Magpie 中重新加载插件并打开 Ducoro 页面。'))
+        if (body !== undefined || attempt >= 2) throw DucoroI18n.error(t('暂时无法连接 Ducoro 插件页面服务。请稍后重试；若持续失败，请在 Magpie 中重新加载插件并打开 Ducoro 页面。'))
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
       }
     }
     let value
-    try { value = await response.json() } catch { throw Error(t('页面服务返回内容无效，请重新打开 Ducoro 页面。')) }
-    if (!response.ok) throw Error(value?.error || t('读取失败，请重试。'))
+    try { value = await response.json() } catch { throw DucoroI18n.error(t('页面服务返回内容无效，请重新打开 Ducoro 页面。')) }
+    if (!response.ok) {
+      const localizedMessage=t(value?.errorMessage??value?.error??'读取失败，请重试。')
+      throw Object.assign(Error(String(localizedMessage)),{localizedMessage})
+    }
     return value
   }
 })()

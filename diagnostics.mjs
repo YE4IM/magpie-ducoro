@@ -19,6 +19,9 @@ const validRoundId = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9
 const OPTIONS = { connection: 'syncConnection', models: 'syncAgentModels', mcp: 'syncMcp', skills: 'syncSkills', instructions: 'syncInstructions', subagents: 'syncSubagents' }
 
 const REASONS = {
+  'state-corrupt': [FEATURES, '管理记录已损坏，同步已暂停，原文件已保留。', '恢复 state.json 的有效备份后，点击重新读取管理记录。不要删除或清空原记录。'],
+  'state-version': [FEATURES, '管理记录版本未知，同步已暂停。', '使用兼容的插件版本，或恢复兼容备份后重新读取管理记录。'],
+  'state-unreadable': [FEATURES, '管理记录暂时无法读取，同步已暂停。', '检查文件权限和存储可用性后，点击重新读取管理记录。'],
   'account-connectors': ['mcp', '部分账户连接器尚未完成配备。', '检查账户连接状态、Bot 支持情况及允许工具，然后重试。'],
   'gateway-sync': ['connection', '连接同步未完成。', '检查 Ducoro 是否可用及 Magpie 连接设置，然后等待重试。'],
   'gateway-unreadable': ['connection', 'Magpie 连接导出暂时缺失或不完整。', '在 Magpie 中确认 Ducoro 已连接，并重新同步。'],
@@ -86,7 +89,7 @@ function addIssue(report, code, features = affected(code), targets = [], { pendi
   const safeFeatures = (Array.isArray(features) ? features : [features]).filter(name => FEATURES.includes(name))
   for (const feature of safeFeatures) {
     const row = report.features[feature]
-    if (row.status === 'disabled' && !REVOCATION_ERRORS.has(code)) continue
+    if (row.status === 'disabled' && !REVOCATION_ERRORS.has(code) && !code.startsWith('state-')) continue
     if (row.issues.some(issue => issue.code === code)) continue
     const issue = issueFor(code, feature, safeTargets.length ? safeTargets : row.targets)
     row.issues.push(issue)
@@ -105,7 +108,7 @@ function summarize(report) {
 }
 
 export function buildDiagnostics({ options = {}, reason, stages = {}, retries = [], state = {}, total, capabilities, startedAt, roundId, now = new Date() } = {}) {
-  const report = { schemaVersion: 1, pluginVersion: '0.3.5', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.4.0', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(roundId)) report.roundId = roundId
   for (const feature of FEATURES) {
     report.features[feature] = safeFeature(stages[feature])
@@ -171,7 +174,7 @@ function safeReason(reason) {
 // never become part of a support export or the CLI's output.
 export function sanitizeDiagnostics(input) {
   if (!object(input) || input.schemaVersion !== 1 || !object(input.features) || !timestamp(input.updatedAt)) return null
-  const report = { schemaVersion: 1, pluginVersion: '0.3.5', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.4.0', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(input.roundId)) report.roundId = input.roundId
   for (const feature of FEATURES) report.features[feature] = safeFeature(input.features[feature])
   for (const feature of FEATURES) {
@@ -249,7 +252,7 @@ export function createDiagnostics({ options = {}, now = () => new Date() } = {})
       if (!round) return
       completed = structuredClone({ ...round, options, state, total, capabilities, completedAt: now().toISOString(), probeStatus: null })
     },
-    read({ syncing = false } = {}) {
+    read({ syncing = false, watchDegraded = false } = {}) {
       const date = now()
       const report = buildDiagnostics({ ...(completed ?? { options }), now: date })
       if (!completed) { addIssue(report, 'report-missing', FEATURES, [], { pending: false }); summarize(report) }
@@ -257,6 +260,7 @@ export function createDiagnostics({ options = {}, now = () => new Date() } = {})
         report.features.mcp.probeStatus = completed.probeStatus
         if (completed.probeStatus === 'failed') { addIssue(report, 'mcp-probe', ['mcp']); summarize(report) }
       }
+      if (watchDegraded) { addIssue(report, 'watch-error', FEATURES, [], { pending:false }); summarize(report) }
       const age = completed ? date.getTime() - Date.parse(completed.completedAt) : null
       return { ...report, lastSyncedAt: completed?.completedAt ?? null, syncing, stale: age === null || age > 300_000 || age < -60_000 }
     },

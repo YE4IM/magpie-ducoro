@@ -1,5 +1,21 @@
 # 更新记录
 
+## 0.4.0 — 2026-11-07
+
+0.4.0 新增逐 Bot 变更预览与保存前确认，可在应用设置前查看模型、连接器、技能分配及账户工具权限的变化，并对照 Magpie 期望与 Ducoro 当前状态。账户权限冲突支持保留 Ducoro 当前配置或重新应用 Magpie 设置，配合分项能力检测、撤销优先和故障隔离，让同步更清晰、更可靠。新版还完善了管理记录保护与监听恢复，提供自动跟随 Magpie 语言的完整中英文界面，切换语言时保留未保存的草稿。
+
+Version 0.4.0 adds per-Bot change previews and a review step before saving, making it easier to see changes to models, connector and skill assignments, and account tool permissions. Compare desired Magpie settings with the current Ducoro state, and resolve permission conflicts by keeping Ducoro’s settings or reapplying Magpie’s. Separate capability checks, prioritized removals and isolated failures make synchronization clearer and more reliable. This release also strengthens ownership record protection and watch recovery, with a complete English and Chinese interface that follows Magpie’s language while preserving unsaved drafts.
+
+- 新增逐 Bot 变更预览与保存前确认，呈现全局和 Bot 层资源迁移、模型及账户工具权限变化。
+- Bot 卡片对照 Magpie 期望与 Ducoro 当前状态，期望模型读取 Magpie 导出，并遵守目标 Bot 范围。
+- 账户权限冲突支持保留 Ducoro 当前权限或重新应用 Magpie 配置；决定绑定权限快照与管理记录版本，写入前再次核对。
+- 分项检测模型目录、模型命令、账户权限操作及 Bot 资源命令，缺少某项能力时其他功能仍可独立同步。
+- 账户撤销优先于新增，连接器故障按项隔离，并保留原权限恢复和待核实写入记录。
+- 管理记录不可读、损坏或版本未知时暂停同步并保留原件；诊断页提供重新读取入口。
+- 监听恢复检查逐步退避，仅在源文件变化时触发降级对账，避免无变化时反复打断读取。
+- 修复技能能力误报，区分有效空导出、连接断开与导出不可读，正确显示模型保留或同步暂缓状态。
+- 预览、账户抽屉、能力说明、恢复提示及校验错误完整支持中英文；语言切换保留草稿、名称与权限值，时间和列表分隔符同步更新。
+
 ## 0.3.5 — 2026-11-06
 
 0.3.5 优化了配置界面与资源分配体验：账户连接器改用侧边抽屉管理，模型能力支持同步、搜索 Ducoro 上游目录，同时精简 Magpie 插件列表中的重复说明与入口。新版界面自动跟随 Magpie 的语言设置，简体和繁体中文使用中文，其余语言使用英文，无需手动切换；语言变化时保留未保存的设置与分配草稿。

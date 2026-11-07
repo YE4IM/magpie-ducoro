@@ -40,6 +40,14 @@ export function validateOptions(options) {
       }
     }
   }
+  if (options.accountResolutions !== undefined) {
+    const policy = p => p === null || record(p) && names(p.allow) && names(p.deny ?? [])
+    if (!record(options.accountResolutions)) fail('accountResolutions','object-required')
+    else for (const [id, rows] of Object.entries(options.accountResolutions)) {
+      if (!botId(id) || !record(rows)) { fail('accountResolutions','assignment-invalid'); continue }
+      for (const [slug, value] of Object.entries(rows)) if (!/^[A-Za-z0-9_-]+$/.test(slug) || ['__proto__','constructor','prototype'].includes(slug) || !record(value) || !['keep','reapply'].includes(value.mode) || !/^[a-f0-9]{64}$/.test(value.revision ?? '') || !policy(value.actual)) fail('accountResolutions','resolution-invalid')
+    }
+  }
   if (options.resourceAssignments !== undefined) {
     if (!record(options.resourceAssignments)) fail('resourceAssignments', 'object-required')
     else for (const [id, assignment] of Object.entries(options.resourceAssignments)) {

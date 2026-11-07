@@ -1,5 +1,5 @@
 import './ui/i18n.js'
-const { translate, format, localizeReport, languageFor } = globalThis.DucoroI18n
+const { translate, format, localizeReport, languageFor, message } = globalThis.DucoroI18n
 // Loopback page service. Inventory is projected explicitly: no raw credentials,
 // account records, endpoint URLs, server arguments or skill bodies reach HTML.
 import { createServer } from 'node:http'
@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { validateOptions } from './options.mjs'
+import { buildSyncPreview, detectCapabilities } from './sync-preview.mjs'
 
 export const list = (value, keys = ['items', 'entries', 'agents', 'bots', 'connections', 'connectors', 'toolkits', 'tools']) => {
   if (Array.isArray(value)) return value
@@ -26,16 +27,27 @@ export const toolRows = value => list(value, ['tools', 'items']).map(x => ({
 })).filter(x => x.slug)
 const jsonFile = async path => JSON.parse(await readFile(path, 'utf8'))
 
+export function gatewayModelState(value) {
+  const object = x => x !== null && typeof x === 'object' && !Array.isArray(x)
+  const gateway = value?.gateway === undefined ? {} : value.gateway
+  if (!object(value) || !object(gateway) || !['url','v1','key'].every(k => gateway[k] === undefined || typeof gateway[k] === 'string')) return {status:'unknown',model:''}
+  const url = (gateway.url ?? '').trim(), key = (gateway.key ?? '').trim()
+  if (Boolean(url) !== Boolean(key)) return {status:'unknown',model:''}
+  const model = typeof value.model === 'string' ? value.model : value.model?.id
+  return {status:url ? 'connected' : 'disconnected',model:url ? text(model) : ''}
+}
+
 export async function inventory({ options, paths, run, language = 'en' }) {
-  const warnings = []
+  const warnings = [], warningMessages = []
+  const warn = (key, values = []) => { warnings.push(format(key,values,language)); warningMessages.push(message(key,values)) }
   const read = async (args, label, project) => {
     try {
       const result = await run(args, { timeoutMs: 15000 })
       if (!result.ok) throw Error()
       return project(result.json)
-    } catch { warnings.push(format('{0}读取失败，请确认 Ducoro 已启动并刷新。', [translate(label, language)], language)); return null }
+    } catch { warn('{0}读取失败，请确认 Ducoro 已启动并刷新。', [message(label)]); return null }
   }
-  const [bots, routes, catalog, library] = await Promise.all([
+  const [bots, routes, catalog, library, gateway] = await Promise.all([
     read(['agent','list'], 'Bot 列表', value => list(value, ['agents','bots']).map(x => ({
       id: text(x.id), name: text(x.name) || text(x.id), runtime: text(x.modelPreference?.runtime),
       connectionSlug: text(x.modelPreference?.connectionSlug), model: text(x.modelPreference?.model),
@@ -51,13 +63,17 @@ export async function inventory({ options, paths, run, language = 'en' }) {
     jsonFile(paths.library).then(value => {
       if (!Array.isArray(value.mcp ?? []) || !Array.isArray(value.skills ?? [])) throw Error()
       return { mcp: selected(value.mcp).map(x => ({name: text(x.name)})), skills: selected(value.skills).map(x => ({name: text(x.name)})) }
-    }).catch(() => { warnings.push(translate('Magpie 资源库读取失败，现有分配会保留。', language)); return null }),
+    }).catch(() => { warn('Magpie 资源库读取失败，现有分配会保留。'); return null }),
+    jsonFile(paths.bridge).catch(() => null),
   ])
   const route = routes?.find(x => x.slug === options.connectionSlug)
   const models = route ? (route.availableModelInfos ?? []).filter(x => !route.models?.length || route.models.includes(x.id)).map(x => ({id: text(x.id), name: text(x.name ?? x.id)})) : []
-  if (!route && routes) warnings.push(translate('尚未找到 Magpie 模型连接，请先在 Magpie 中连接 Ducoro。', language))
-  if (catalog && catalog.sourceStatus !== 'ok') warnings.push(translate('Ducoro 账户连接器目录暂不可用，请检查账户配对状态。', language))
-  return { bots, models, defaultModel: text(route?.defaultModel), library, catalog, warnings, updatedAt: new Date().toISOString() }
+  if (!route && routes) warn('尚未找到 Magpie 模型连接，请先在 Magpie 中连接 Ducoro。')
+  if (catalog && catalog.sourceStatus !== 'ok') warn('Ducoro 账户连接器目录暂不可用，请检查账户配对状态。')
+  const gatewayState = gatewayModelState(gateway)
+  if (gatewayState.status === 'unknown') warn('Magpie 模型导出暂不可读，期望模型尚未确认。')
+  else if (gatewayState.status === 'disconnected') warn('Magpie 当前未连接 Ducoro，模型同步将按断开连接设置处理。')
+  return { bots, models, defaultModel: gatewayState.model, gatewayStatus: gatewayState.status, connectionDefaultModel:text(route?.defaultModel), library, catalog, warnings, warningMessages, updatedAt: new Date().toISOString() }
 }
 
 export async function createPageService({ options, paths, stateDir, run, trigger, getReport, getModelCatalog, log = () => {}, retryDelayMs = 500 }) {
@@ -74,10 +90,17 @@ export async function createPageService({ options, paths, stateDir, run, trigger
     if (!result.ok) throw Error('Ducoro 暂不可用，或不支持此操作。请检查后台及账户状态。')
     return result.json
   }
+  let capabilityCache = null, capabilityTime = 0
+  const getCapabilities = async () => {
+    if (!capabilityCache || Date.now()-capabilityTime>30000) {
+      capabilityCache = await detectCapabilities(run); capabilityTime=Date.now()
+    }
+    return capabilityCache
+  }
   const server = createServer(async (req, res) => {
     const language = languageFor(req.headers['x-ducoro-language'])
     const reply = (code, body, type = 'application/json; charset=utf-8') => {
-      if (type.startsWith('application/json') && body?.error) body = {...body, error: translate(body.error, language)}
+      if (type.startsWith('application/json') && body?.error) body = {...body, error: translate(body.error, language), errorMessage:message(body.error)}
       res.writeHead(code, {'Content-Type': type, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', 'Referrer-Policy':'no-referrer'})
       res.end(type.startsWith('application/json') ? JSON.stringify(body) : body)
     }
@@ -99,7 +122,10 @@ export async function createPageService({ options, paths, stateDir, run, trigger
           return reply(204,'','text/plain')
         }
         if (req.headers['x-ducoro-token'] !== token) return reply(403, {error:'页面连接已更新，请重新读取页面'})
-        if (req.method === 'GET' && path === 'api/inventory') return reply(200, await inventory({options,paths,run,language}))
+        if (req.method === 'GET' && path === 'api/inventory') {
+          const [data,capabilities] = await Promise.all([inventory({options,paths,run,language}),getCapabilities()])
+          return reply(200,{...data,capabilities})
+        }
         if (req.method === 'GET' && path === 'api/report') return reply(200, localizeReport(await getReport(), language))
         if (path === 'api/model-catalog' && ['GET', 'POST'].includes(req.method)) {
           try {
@@ -120,18 +146,23 @@ export async function createPageService({ options, paths, stateDir, run, trigger
           return reply(200, policyRows(await call(['agent','connector','list',id])))
         }
         if (req.method === 'POST' && path === 'api/retry') { trigger('page-retry',0); return reply(200,{queued:true}) }
-        if (req.method === 'POST' && path === 'api/validate') {
+        if (req.method === 'POST' && ['api/validate','api/preview'].includes(path)) {
           let size = 0, chunks = []
           for await (const chunk of req) { size += chunk.length; if (size > 512 * 1024) return reply(413,{error:'设置内容过大'}); chunks.push(chunk) }
           const value = JSON.parse(Buffer.concat(chunks).toString())
           if (validateOptions(value).length) return reply(400,{error:'设置格式无效，请检查分配和工具权限。'})
+          if (path === 'api/preview') {
+            const next = {...options,...value}
+            const [data,capabilities] = await Promise.all([inventory({options:next,paths,run,language}),getCapabilities()])
+            return reply(200, await buildSyncPreview({options:next,currentOptions:options,data,stateDir,run,capabilities,language}))
+          }
           return reply(200,{valid:true})
         }
         return reply(404,{error:'操作不存在'})
       }
       if (req.method !== 'GET') return reply(405,{error:'不支持此操作'})
       const file = path || 'index.html'
-      if (!['index.html','style.css','app.js','model.js','service-bridge.js','resources.js','i18n.js','ducoro.svg'].includes(file)) return reply(404,{error:'文件不存在'})
+      if (!['index.html','style.css','app.js','model.js','service-bridge.js','resources.js','preview.js','i18n.js','ducoro.svg'].includes(file)) return reply(404,{error:'文件不存在'})
       let body = await readFile(join(root,file))
       const types = {html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'}
       if (file === 'index.html') {

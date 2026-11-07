@@ -18,7 +18,7 @@ const DEFAULT_OPTIONS = {
   connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
   syncMcp: true, syncSkills: true, syncInstructions: true, syncSubagents: true,
   prune: true, onDisconnect: 'keep', targetAgents: [], subagentNames: [],
-  modelScope: 'global', botModels: {}, accountConnectors: {},
+  modelScope: 'global', botModels: {}, accountConnectors: {}, accountResolutions: {},
   mcpScope: 'global', skillsScope: 'global', resourceAssignments: {},
   modelCapabilityRefs: {}, officialProviders: [
     'zai', 'zai-coding-cn', 'kimi-coding', 'moonshotai', 'moonshotai-cn',
@@ -32,36 +32,36 @@ const splitList = value => [...new Set(String(value).split(/[,\r\n]/).map(s => s
 const coordinate = value => typeof value === 'string' && /^[^\s,=]+\/[^\s,=]+$/.test(value)
 
 function optionsForDisplay(raw = {}) {
-  if (!isRecord(raw)) throw Error(t('插件选项格式无效，请先在 Magpie 的 JSON 选项中修复。'))
+  if (!isRecord(raw)) throw DucoroI18n.error(t('插件选项格式无效，请先在 Magpie 的 JSON 选项中修复。'))
   const result = { ...structuredClone(DEFAULT_OPTIONS), ...structuredClone(raw) }
   validateFields(result)
   return result
 }
 
 function validateFields(value) {
-  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw Error(t`${key} 必须是开关值。`)
-  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw Error(t('连接标识仅支持小写字母、数字和短横线。'))
-  if (!['keep', 'remove'].includes(value.onDisconnect)) throw Error(t('请选择有效的断开连接处理方式。'))
-  if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw Error(t('模型或连接器分配格式无效。'))
-  if (!['global', 'agents'].includes(value.mcpScope)) throw Error(t('请选择有效的 连接器 作用域。'))
-  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw Error(t('技能作用域需要一个有效的 Bot ID。'))
+  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw DucoroI18n.error(t`${key} 必须是开关值。`)
+  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw DucoroI18n.error(t('连接标识仅支持小写字母、数字和短横线。'))
+  if (!['keep', 'remove'].includes(value.onDisconnect)) throw DucoroI18n.error(t('请选择有效的断开连接处理方式。'))
+  if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw DucoroI18n.error(t('模型或连接器分配格式无效。'))
+  if (!['global', 'agents'].includes(value.mcpScope)) throw DucoroI18n.error(t('请选择有效的 连接器 作用域。'))
+  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw DucoroI18n.error(t('技能作用域需要一个有效的 Bot ID。'))
   for (const key of ['targetAgents', 'subagentNames', 'officialProviders']) {
-    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw Error(t`${key} 需要名称列表。`)
-    if (value[key].length > 256) throw Error(t('单个列表最多支持 256 项。'))
+    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw DucoroI18n.error(t`${key} 需要名称列表。`)
+    if (value[key].length > 256) throw DucoroI18n.error(t('单个列表最多支持 256 项。'))
   }
-  if (!value.targetAgents.every(botId)) throw Error(t('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。'))
-  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw Error(t('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。'))
-  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw Error(t('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。'))
-  if (!isRecord(value.modelCapabilityRefs)) throw Error(t('模型能力参考需要映射对象。'))
+  if (!value.targetAgents.every(botId)) throw DucoroI18n.error(t('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。'))
+  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw DucoroI18n.error(t('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。'))
+  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw DucoroI18n.error(t('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。'))
+  if (!isRecord(value.modelCapabilityRefs)) throw DucoroI18n.error(t('模型能力参考需要映射对象。'))
   for (const [route, ref] of Object.entries(value.modelCapabilityRefs)) {
-    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw Error(t('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。'))
+    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw DucoroI18n.error(t('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。'))
   }
-  if (!isRecord(value.resourceAssignments)) throw Error(t('Bot 资源分配需要对象。'))
+  if (!isRecord(value.resourceAssignments)) throw DucoroI18n.error(t('Bot 资源分配需要对象。'))
   for (const [id, assignment] of Object.entries(value.resourceAssignments)) {
-    if (!botId(id)) throw Error(t('资源分配中的 Bot ID 格式应为 agt-…。'))
-    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw Error(t('Bot 资源分配仅支持 连接器 和技能。'))
+    if (!botId(id)) throw DucoroI18n.error(t('资源分配中的 Bot ID 格式应为 agt-…。'))
+    if (!isRecord(assignment) || Object.keys(assignment).some(k => !['mcp', 'skills'].includes(k))) throw DucoroI18n.error(t('Bot 资源分配仅支持 连接器 和技能。'))
     for (const key of ['mcp', 'skills']) if (Object.hasOwn(assignment, key)) {
-      if (!Array.isArray(assignment[key]) || assignment[key].length > 256 || !assignment[key].every(s => typeof s === 'string' && s.trim() && !/[,\r\n]/.test(s))) throw Error(t('自定义资源请填写资源库名称列表，留空代表不分配。'))
+      if (!Array.isArray(assignment[key]) || assignment[key].length > 256 || !assignment[key].every(s => typeof s === 'string' && s.trim() && !/[,\r\n]/.test(s))) throw DucoroI18n.error(t('自定义资源请填写资源库名称列表，留空代表不分配。'))
     }
   }
   return value
@@ -75,7 +75,7 @@ function mergeEditedOptions(rawCurrent, baseline, edited, keys = EDITABLE_KEYS) 
   const current = optionsForDisplay(rawCurrent)
   const changed = keys.filter(key => stable(edited[key]) !== stable(baseline[key]))
   for (const key of changed) if (stable(current[key]) !== stable(baseline[key]) && stable(current[key]) !== stable(edited[key])) {
-    throw Error(t('这些设置已在其他页面更新。请点击「重新读取」后再修改，避免覆盖新配置。'))
+    throw DucoroI18n.error(t('这些设置已在其他页面更新。请点击「重新读取」后再修改，避免覆盖新配置。'))
   }
   return { options: { ...rawCurrent, ...Object.fromEntries(changed.map(key => [key, edited[key]])) }, changed }
 }
@@ -86,7 +86,7 @@ const safeText = (value, fallback = '') => typeof value === 'string' ? value.sli
 const stringList = value => Array.isArray(value) ? value.filter(x => typeof x === 'string').slice(0, 256).map(x => x.slice(0, 200)) : []
 
 function parseDiagnosticReport(raw) {
-  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw Error(t('实时诊断报告格式无法识别，请更新插件并重新打开页面。'))
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.features) || !Object.keys(FEATURE_NAMES).some(key => Object.hasOwn(raw.features, key))) throw DucoroI18n.error(t('实时诊断报告格式无法识别，请更新插件并重新打开页面。'))
   const issues = Array.isArray(raw.issues) ? raw.issues : []
   const cleanIssue = issue => ({ feature: safeText(issue.feature), code: safeText(issue.code), message: safeText(issue.message, t('需要进一步检查')), nextAction: safeText(issue.nextAction), targets: stringList(issue.targets) })
   return {

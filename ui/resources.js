@@ -3,9 +3,12 @@ const { t } = globalThis.DucoroI18n;
 (() => {
   const $ = id => document.getElementById(id)
   const el = (tag,text,cls) => {const n=document.createElement(tag);if(text!==undefined)DucoroI18n.setText(n, text);if(cls)n.className=cls;return n}
-  let draft = {}, data = null, refreshBusy = false, activeDrawer = null
+  let draft = {}, data = null, refreshBusy = false, activeDrawer = null, comparison = null
   const equipmentCounts = new Map()
-  const notify = () => document.dispatchEvent(new Event('input',{bubbles:true}))
+  const notify = () => {
+    for(const note of document.querySelectorAll('.comparison-freshness'))DucoroI18n.setText(note,t('草稿已变化，可点击「预览变化」重新核对。'))
+    document.dispatchEvent(new Event('input',{bubbles:true}))
+  }
   const option = (select,value,text) => {const n=el('option',text);n.value=value;select.append(n)}
   const labelFor = (text,input) => {const n=el('label',text);n.append(input);return n}
   const select = (entries,value) => {const n=el('select');for(const [k,v] of entries)option(n,k,v);n.value=value;return n}
@@ -17,6 +20,7 @@ const { t } = globalThis.DucoroI18n;
     const box=el('div',undefined,'resource-field');box.append(el('h3',title),el('span',t('来自 Magpie'),'source-label'))
     const supported=bot.runtime==='pi-agent'
     if(!supported){box.append(el('p',t('此 Bot 的运行方式暂不支持资源库分配。'),'muted'));return box}
+    if(draft[scopeKey]==='agents'&&data?.capabilities?.[key==='mcp'?'botMcp':'botSkills']==='unavailable'){box.append(el('p',t('当前宿主缺少按 Bot 分配此资源的命令，现有设置已保留。'),'muted'));return box}
     const all=data?.library?.[key]
     if(!all){box.append(el('p',t('资源库暂不可读，保留现有分配。'),'muted'));return box}
     const assignment=draft.resourceAssignments[bot.id]??{}
@@ -47,12 +51,17 @@ const { t } = globalThis.DucoroI18n;
   }
   function modelField(bot) {
     const box=el('div',undefined,'resource-field');box.append(el('h3',t('模型')),el('span',t('来自 Magpie'),'source-label'))
-    const eligible=bot.runtime==='pi-agent'&&bot.connectionSlug===draft.connectionSlug
+    const inTargets=!draft.targetAgents?.length||draft.targetAgents.includes(bot.id)
+    const eligible=bot.runtime==='pi-agent'&&bot.connectionSlug===draft.connectionSlug&&inTargets
     const model=select([['',t('跟随全局模型')],...(data?.models??[]).map(x=>[x.id,x.name])],draft.botModels[bot.id]??'')
     if(draft.botModels[bot.id]&&!data?.models?.some(x=>x.id===draft.botModels[bot.id])){option(model,draft.botModels[bot.id],t`${draft.botModels[bot.id]}（当前不可用）`);model.value=draft.botModels[bot.id]}
     DucoroI18n.setAttribute(model, 'aria-label', t`${bot.name} 模型`)
-    model.disabled=!eligible||draft.modelScope==='global'||!data.models.length;model.dataset.locked=String(model.disabled)
-    model.addEventListener('change',()=>{if(model.value)draft.botModels[bot.id]=model.value;else delete draft.botModels[bot.id];notify()})
+    model.disabled=!eligible||draft.modelScope==='global'||!data.models.length||data.capabilities?.botModelWrite==='unavailable';model.dataset.locked=String(model.disabled)
+    model.addEventListener('change',()=>{if(model.value)draft.botModels[bot.id]=model.value;else delete draft.botModels[bot.id];DucoroI18n.setText(expectedNote,t`Magpie 期望：${model.value||data.defaultModel||t('目标模型尚不可用')}`);notify()})
+    const expected=draft.modelScope==='agents'?(draft.botModels[bot.id]??data.defaultModel):data.defaultModel
+    const expectedNote=el('p',t`Magpie 期望：${eligible&&draft.syncAgentModels&&draft.syncConnection?expected||t('目标模型尚不可用'):t('保持当前模型')}`,'muted');box.append(expectedNote)
+    if(data.capabilities?.botModelWrite!=='available')box.append(el('p',t('模型写入命令不可用或未确认，其他资源可独立同步。'),'muted'))
+    if(!inTargets)box.append(el('p',t('此 Bot 不在目标列表中，模型设置保持不变。'),'muted'))
     box.append(model,el('p',eligible?t`全局模型：${data.defaultModel||t('尚不可用')}；当前：${bot.model||t('未配置')}`:t`当前：${bot.model||t('未配置')}。仅管理绑定本插件连接的 Pi Agent 模型。`,'muted'))
     return box
   }
@@ -78,6 +87,7 @@ const { t } = globalThis.DucoroI18n;
     title.replaceWith(heading)
     heading.append(title)
     if (!['pi-agent','claude-code','codex'].includes(bot.runtime)) return
+    if(data.capabilities?.accountPolicy==='unavailable'){heading.append(el('span',t('账户工具命令不可用'),'muted'));return}
     const actions = el('div', undefined, 'account-actions')
     const summary = el('span', '', 'account-summary')
     const button = el('button', t('账户配置'), 'text-button')
@@ -135,7 +145,7 @@ const { t } = globalThis.DucoroI18n;
       body.replaceChildren(el('p', t('正在读取当前配备…'), 'muted'))
       DucoroI18n.setAttribute(body, 'aria-busy', 'true')
       try {
-        if (!data.catalog || data.catalog.sourceStatus !== 'ok') throw Error(t('账户目录暂不可用，请关闭抽屉并刷新 Bot 列表后重试。现有配备已保留。'))
+        if (!data.catalog || data.catalog.sourceStatus !== 'ok') throw DucoroI18n.error(t('账户目录暂不可用，请关闭抽屉并刷新 Bot 列表后重试。现有配备已保留。'))
         const current = await ducoroApi(`equipment?id=${encodeURIComponent(bot.id)}`)
         if (!dialog.open || !dialog.isConnected) return
         equipmentCounts.set(bot.id, current.length)
@@ -184,7 +194,7 @@ const { t } = globalThis.DucoroI18n;
                   check.parentElement.title = tool.description || tool.slug
                 }
                 if (!all.length) content.append(el('p', t('当前没有可分配工具。'), 'muted'))
-              } catch (error) { DucoroI18n.setText(state, t(error.message)); loadTools.disabled = false }
+              } catch (error) { DucoroI18n.setText(state, t(error.localizedMessage??error.message)); loadTools.disabled = false }
             })
             choices.append(details)
           }
@@ -202,7 +212,7 @@ const { t } = globalThis.DucoroI18n;
         renderChoices()
       } catch (error) {
         if (!dialog.open || !dialog.isConnected) return
-        const message = el('p', t(error.message), 'notice error')
+        const message = el('p', t(error.localizedMessage??error.message), 'notice error')
         DucoroI18n.setAttribute(message, 'role', 'alert')
         const retry = el('button', t('重试读取'), 'secondary')
         retry.type = 'button'
@@ -222,13 +232,31 @@ const { t } = globalThis.DucoroI18n;
       const card=el('section',undefined,'assignment-row');card.dataset.botId=bot.id;const heading=el('div',undefined,'bot-heading')
       heading.append(el('h3',bot.name),el('span',bot.id,'bot-id'));card.append(heading)
       const grid=el('div',undefined,'resource-grid');const connectors=libraryField(bot,'mcp',t('连接器'),'mcpScope');accountField(bot,connectors)
-      grid.append(modelField(bot),connectors,libraryField(bot,'skills',t('技能'),'skillsScope'));card.append(grid);$('assignments').append(card);updateAccountSummary(bot.id)
+      grid.append(modelField(bot),connectors,libraryField(bot,'skills',t('技能'),'skillsScope'));card.append(grid)
+      const row=comparison?.rows.find(x=>x.id===bot.id)
+      if(row){
+        const details=el('details',undefined,'bot-comparison');details.append(el('summary',t('期望与当前状态')),el('p',t`读取于 ${DucoroI18n.dateTime(comparison.updatedAt,true)}`,'comparison-freshness muted'))
+        details.append(DucoroPreview.renderRow(row,(id,item,mode)=>globalThis.DucoroResources.resolveConflict(id,item,mode)));card.append(details)
+      }
+      $('assignments').append(card);updateAccountSummary(bot.id)
       if(document.body.dataset.busy==='true') for(const input of card.querySelectorAll('input,select,button'))input.disabled=true
     }
   }
   globalThis.DucoroResources={
-    set(options){closeAccountDrawer();draft=structuredClone(options);render()},
-    collect(){const assignments=Object.fromEntries(Object.entries(draft.resourceAssignments??{}).filter(([,x])=>Object.keys(x).length));return {resourceAssignments:assignments,botModels:draft.botModels??{},accountConnectors:draft.accountConnectors??{}}},
+    set(options){closeAccountDrawer();draft=structuredClone(options);comparison=null;render()},
+    showComparison(value){comparison=value;render()},
+    resolveConflict(id,item,mode){
+      draft.accountResolutions??={};draft.accountResolutions[id]??={}
+      draft.accountResolutions[id][item.slug]={mode,revision:item.revision,actual:item.current}
+      if(mode==='keep'){
+        draft.accountConnectors[id]??={}
+        if(item.current?.allow.length)draft.accountConnectors[id][item.slug]=structuredClone(item.current)
+        else delete draft.accountConnectors[id][item.slug]
+      }
+      notify()
+      for(const note of document.querySelectorAll('.comparison-freshness'))DucoroI18n.setText(note,t('冲突处理已加入草稿，请重新预览后保存。'))
+    },
+    collect(){const assignments=Object.fromEntries(Object.entries(draft.resourceAssignments??{}).filter(([,x])=>Object.keys(x).length));return {accountResolutions:draft.accountResolutions??{},resourceAssignments:assignments,botModels:draft.botModels??{},accountConnectors:draft.accountConnectors??{}}},
     scopes(values){Object.assign(draft,values);render()},
     async refresh(){
       if(refreshBusy)return;refreshBusy=true;$('refresh-bots').disabled=true;DucoroI18n.setText($('inventory-state'), t('正在刷新 Bot 和资源…'))
@@ -238,9 +266,11 @@ const { t } = globalThis.DucoroI18n;
         // and all draft assignments until the source can be read again.
         data={...next,bots:next.bots??data?.bots??null,library:next.library??data?.library??null}
         if(next.bots){const ids=new Set(next.bots.map(x=>x.id));for(const key of ['resourceAssignments','botModels','accountConnectors'])for(const id of Object.keys(draft[key]??{}))if(!ids.has(id))delete draft[key][id]}
-        render();notify();DucoroI18n.setText($('inventory-message'), next.warnings.join(' '));$('inventory-message').hidden=!next.warnings.length
-        DucoroI18n.setText($('inventory-state'), next.bots?t`${next.bots.length} 个 Bot · 刷新于 ${new Date(next.updatedAt).toLocaleTimeString(document.documentElement.lang)} · 未保存的选择已保留`:t('Bot 列表读取失败，现有选择已保留。'))
-      }catch(error){DucoroI18n.setText($('inventory-state'), t(error.message))}
+        try { comparison=await ducoroApi('preview',draft) } catch { comparison=null }
+        render();notify();for(const note of document.querySelectorAll('.comparison-freshness'))DucoroI18n.setText(note,t`读取于 ${DucoroI18n.dateTime(comparison.updatedAt,true)}`)
+        DucoroI18n.setText($('inventory-message'), t(DucoroI18n.joinMessages((next.warningMessages??next.warnings).map(x=>t(x)),' ')));$('inventory-message').hidden=!next.warnings.length
+        DucoroI18n.setText($('inventory-state'), next.bots?t`${next.bots.length} 个 Bot · 刷新于 ${DucoroI18n.dateTime(next.updatedAt,true)} · 未保存的选择已保留`:t('Bot 列表读取失败，现有选择已保留。'))
+      }catch(error){DucoroI18n.setText($('inventory-state'), t(error.localizedMessage??error.message))}
       finally{refreshBusy=false;$('refresh-bots').disabled=false}
     },
   }

@@ -355,6 +355,99 @@
   "重新打开": "Reopen"
 }
 
+  Object.assign(ENGLISH, {
+  "预览变化": "Preview changes",
+  "保存前预览": "Review before saving",
+  "逐 Bot 变更预览": "Changes by Bot",
+  "返回修改": "Back to editing",
+  "确认保存并同步": "Save and sync",
+  "关闭": "Close",
+  "未配备": "Not equipped",
+  "无": "None",
+  "允许：{0}；拒绝：{1}": "Allow: {0}; deny: {1}",
+  "新增": "Add",
+  "更新": "Update",
+  "撤销": "Remove",
+  "恢复原权限": "Restore previous permissions",
+  "保持": "Keep",
+  "外部修改冲突": "External changes conflict",
+  "由 Ducoro 管理": "Managed in Ducoro",
+  "Magpie 尚未连接，保持当前模型": "Magpie is disconnected; keep the current model",
+  "Magpie 导出暂不可读，模型同步暂缓": "Magpie export is unavailable; model sync is deferred",
+  "已一致": "Up to date",
+  "等待同步": "Pending sync",
+  "目标模型当前不可用": "The target model is unavailable",
+  "写入能力尚未确认": "Write support has not been confirmed",
+  "此 Bot 模型不在同步范围": "This Bot’s model is outside the sync scope",
+  "Ducoro 当前模型\n{0}": "Current model in Ducoro\n{0}",
+  "Magpie 期望模型\n{0}": "Desired model in Magpie\n{0}",
+  "未配置": "Not configured",
+  "保持当前模型": "Keep the current model",
+  "资源库连接器": "Library connectors",
+  "{0} · 预计获得：{1}；预计失去插件提供的资源：{2}": "{0} · Expected additions: {1}; plugin resources no longer provided: {2}",
+  "{0} · {1} · {2}": "{0} · {1} · {2}",
+  "{0} · {1}": "{0} · {1}",
+  "Ducoro 当前权限\n{0}": "Current permissions in Ducoro\n{0}",
+  "Magpie 期望 / 撤销后恢复\n{0}": "Desired in Magpie / restored on removal\n{0}",
+  "保持当前权限": "Keep the current permissions",
+  "采用 Ducoro 当前权限": "Use current Ducoro permissions",
+  "重新应用 Magpie 权限": "Reapply Magpie permissions",
+  "账户工具当前权限读取失败，无法确认差异；现有权限会保留。": "Could not read current account tool permissions. Differences are unknown; existing permissions will be kept.",
+  "没有分配范围变化。": "No changes to assignment scopes.",
+  "读取时间：{0}。同步前会再次校验当前状态。": "Read at: {0}. Current settings will be checked again before syncing.",
+  "请先恢复管理记录或数据来源，再重新预览。同步诊断中可重新读取管理记录。": "Restore the ownership record or data source, then preview again. You can request another read of the ownership record under Sync diagnostics.",
+  "宿主能力检测": "Host capabilities",
+  "上游模型目录": "Upstream model catalog",
+  "Bot 模型命令": "Bot model commands",
+  "账户权限读取": "Read account permissions",
+  "账户配备命令": "Equip account connectors",
+  "账户权限更新命令": "Update account permissions",
+  "账户撤销命令": "Remove account connectors",
+  "按 Bot 连接器": "Per-Bot connectors",
+  "按 Bot 技能": "Per-Bot skills",
+  "{0}：{1}": "{0}: {1}",
+  "本地命令可用，执行权限仍需同步时核实": "Local command available; execution permissions still need verification during sync",
+  "当前不可用，其他功能可独立同步": "Unavailable; other features can sync independently",
+  "草稿已变化，可点击「预览变化」重新核对。": "The draft has changed. Select “Preview changes” to check it again.",
+  "当前宿主缺少按 Bot 分配此资源的命令，现有设置已保留。": "This host does not provide the command to assign this resource per Bot. Existing settings are kept.",
+  "Magpie 期望：{0}": "Desired in Magpie: {0}",
+  "目标模型尚不可用": "Target model unavailable",
+  "模型写入命令不可用或未确认，其他资源可独立同步。": "Model write commands are unavailable or unconfirmed. Other resources can sync independently.",
+  "此 Bot 不在目标列表中，模型设置保持不变。": "This Bot is not in the target list. Its model settings will be kept.",
+  "账户工具命令不可用": "Account tool commands unavailable",
+  "期望与当前状态": "Desired and current settings",
+  "读取于 {0}": "Read at {0}",
+  "冲突处理已加入草稿，请重新预览后保存。": "Your conflict resolution is in the draft. Preview again before saving.",
+  "配置在预览期间已变化，请重新读取并再次预览。": "Settings changed while the preview was open. Reload and preview again.",
+  "管理记录恢复": "Restore the ownership record",
+  "若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。": "If state.json cannot be read, is damaged or has an unknown version, the plugin pauses sync and keeps the original file. Check file permissions or restore a valid backup, then request another read. Do not delete or clear the record: it contains information needed to restore permissions.",
+  "重新读取管理记录": "Read the ownership record again",
+  "已请求重新读取。请稍后重新查看诊断报告；文件仍不可读时会继续暂停同步。": "Another read has been requested. Refresh diagnostics shortly. Sync will remain paused if the file is still unreadable.",
+  "Magpie 模型导出暂不可读，期望模型尚未确认。": "The Magpie model export is unreadable. The desired model is not yet known.",
+  "Magpie 当前未连接 Ducoro，模型同步将按断开连接设置处理。": "Magpie is not connected to Ducoro. Model sync will follow the disconnection setting.",
+  "Bot 列表无法读取，无法确认影响范围。": "The Bot list could not be read. The affected scope is unknown.",
+  "全局资源": "Global resources",
+  "{0}：指定的{1}当前不可用，相关同步将保留现状或等待重试。": "{0}: the assigned {1} are unavailable. Related sync will keep current settings or wait for a retry.",
+  "旧版连接器管理记录缺少资源名称，部分移除操作只能在同步时确认。": "Legacy connector ownership records lack resource names. Some removals can only be confirmed during sync.",
+  "资源库暂不可读：连接器与技能的变更预览不可用。": "The library is unreadable. Connector and skill changes cannot be previewed.",
+  "工具权限已在 Ducoro 修改，现有权限会保留。": "Tool permissions were changed in Ducoro. Current permissions will be kept.",
+  "需要在 Ducoro 连接此账户。": "Connect this account in Ducoro first.",
+  "账户工具命令暂不可用。": "Account tool commands are unavailable.",
+  "{0}：Bot 已不存在，账户分配无法执行。": "{0}: this Bot no longer exists. Account assignments cannot be applied.",
+  "已启用试运行：保存后不会执行写入。": "Dry run is enabled. Saving will not perform writes.",
+  "指令与子代理设置也有变化；具体内容及本地运行条件需在同步诊断中核实。": "Instruction or subagent settings have also changed. Check Sync diagnostics for content and local runtime requirements.",
+  "此预览核对资源分配范围、模型与账户工具权限。资源内容更新、同名冲突、模型能力和运行中会话加载情况将在同步时再次校验。": "This preview checks resource scopes, models and account tool permissions. Resource content, name conflicts, model capabilities and loading in active sessions will be checked again during sync.",
+  "管理记录版本未知，请恢复兼容的备份后重新读取。": "The ownership record version is unknown. Restore a compatible backup, then request another read.",
+  "管理记录暂时无法读取；已暂停同步，请检查文件权限后重新读取。": "The ownership record cannot be read. Sync is paused. Check file permissions, then request another read.",
+  "管理记录已损坏；原文件已保留，请恢复备份后重新读取。": "The ownership record is damaged. The original file is kept. Restore a backup, then request another read.",
+  "管理记录已损坏，同步已暂停，原文件已保留。": "The ownership record is damaged. Sync is paused and the original file is kept.",
+  "恢复 state.json 的有效备份后，点击重新读取管理记录。不要删除或清空原记录。": "Restore a valid backup of state.json, then select “Read the ownership record again”. Do not delete or clear the original record.",
+  "管理记录版本未知，同步已暂停。": "The ownership record version is unknown. Sync is paused.",
+  "使用兼容的插件版本，或恢复兼容备份后重新读取管理记录。": "Use a compatible plugin version, or restore a compatible backup and request another read.",
+  "管理记录暂时无法读取，同步已暂停。": "The ownership record cannot be read. Sync is paused.",
+  "检查文件权限和存储可用性后，点击重新读取管理记录。": "Check file permissions and storage availability, then select “Read the ownership record again”."
+})
+
   const languageFor = value => {
     if (typeof value !== 'string') return 'en'
     try {
@@ -365,13 +458,27 @@
   }
   function format(key, values = [], language = 'en') {
     const pattern = languageFor(language) === 'zh' ? key : ENGLISH[key] ?? key
-    return pattern.replace(/\{(\d+)\}/g, (match, index) => index < values.length ? String(values[index]) : match)
+    return pattern.replace(/\{(\d+)\}/g, (match, index) => index < values.length ? render(values[index], language) : match)
   }
   const CHINESE = Object.fromEntries(Object.entries(ENGLISH).map(([zh, en]) => [en, zh]))
   function translate(text, language = 'en') {
     if (typeof text !== 'string') return text
     const source = CHINESE[text] ?? text
     return languageFor(language) === 'zh' ? source : ENGLISH[source] ?? text
+  }
+  // Structured messages retain authored keys across API responses and language changes.
+  const message = (key, values = []) => ({ $ducoroMessage: CHINESE[key] ?? key, values })
+  const joinMessages = (values, separator = null) => ({ $ducoroList: values, separator })
+  const dateTime = (value, timeOnly = false) => ({ $ducoroDate: value, timeOnly })
+  function render(value, language) {
+    if (value instanceof Message) return format(value.key, value.values, language)
+    if (value?.$ducoroMessage && Array.isArray(value.values)) return format(value.$ducoroMessage, value.values, language)
+    if (Array.isArray(value?.$ducoroList)) return value.$ducoroList.map(x => render(x, language)).join(value.separator ?? (languageFor(language) === 'zh' ? '、' : ', '))
+    if (value?.$ducoroDate) {
+      const date = new Date(value.$ducoroDate), locale = languageFor(language) === 'zh' ? 'zh-CN' : 'en'
+      return value.timeOnly ? date.toLocaleTimeString(locale) : date.toLocaleString(locale)
+    }
+    return String(value)
   }
   const textBindings = new WeakMap(), attributeBindings = new WeakMap()
   class Message {
@@ -383,9 +490,15 @@
   // controls or touching input values, focus, names or unsaved assignments.
   function t(strings, ...values) {
     if (strings instanceof Message) return strings
+    if (strings?.$ducoroMessage && Array.isArray(strings.values)) return new Message(strings.$ducoroMessage, strings.values)
+    if (Array.isArray(strings?.$ducoroList) || strings?.$ducoroDate) return new Message('{0}', [strings])
     if (typeof strings === 'string') return new Message(strings)
     const key = strings.map((part, i) => part + (i < values.length ? `{${i}}` : '')).join('')
     return new Message(key, values)
+  }
+  function localizedError(value) {
+    const localizedMessage = t(value)
+    return Object.assign(new Error(String(localizedMessage)), { localizedMessage })
   }
   function setText(el, value) {
     el.textContent = value
@@ -444,5 +557,5 @@
     for (const el of doc.body.querySelectorAll('*')) for (const [name, value] of attributeBindings.get(el) ?? []) el.setAttribute(name, value)
     doc.documentElement.classList.remove('language-pending')
   }
-  globalThis.DucoroI18n = Object.freeze({ languageFor, format, translate, t, setText, setAttribute, localizeHTML, localizeReport, applyDocument, messages: Object.freeze(ENGLISH) })
+  globalThis.DucoroI18n = Object.freeze({ languageFor, format, translate, message, joinMessages, dateTime, render, t, error:localizedError, setText, setAttribute, localizeHTML, localizeReport, applyDocument, messages: Object.freeze(ENGLISH) })
 })()

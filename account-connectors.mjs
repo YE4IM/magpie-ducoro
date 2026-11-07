@@ -1,9 +1,9 @@
 // Account connector assignments are Bot-local, independent of global library
 // definitions. Record previous policies so clearing a plugin assignment restores
 // user equipment, and stop on edits made outside this plugin.
+import { randomUUID } from 'node:crypto'
 import { list, policyRows, toolRows } from './page-service.mjs'
-const comparable = policy => policy == null ? null : {allow:[...(policy.allow ?? [])].sort(),deny:[...(policy.deny ?? [])].sort()}
-const same = (a,b) => JSON.stringify(comparable(a)) === JSON.stringify(comparable(b))
+import { comparablePolicy as comparable, samePolicy as same, planAccountConnector, accountOrder } from './account-plan.mjs'
 
 export async function syncAccountConnectors({options,state,run,save}) {
   const desired = options.syncMcp ? options.accountConnectors ?? {} : {}
@@ -17,29 +17,35 @@ export async function syncAccountConnectors({options,state,run,save}) {
   }
   const bots = list(await call(['agent','list']),['agents','bots'])
   const failures = []
-  for (const id of ids) {
+  const skipped = new Set()
+  for (const revoking of [true,false]) for (const id of ids) {
+    if (skipped.has(id)) continue
     try {
       const bot = bots.find(bot => bot.id === id)
       if (!bot) { delete owned[id]; await save(); continue }
       if (!['pi-agent','claude-code','codex'].includes(bot.modelPreference?.runtime)) throw Error('Bot 不支持账户连接器')
       const current = new Map(policyRows(await call(['agent','connector','list',id])).map(x => [x.slug,x]))
       const history = owned[id] ??= {}
-      for (const slug of new Set([...Object.keys(desired[id] ?? {}),...Object.keys(history)])) {
+      for (const slug of accountOrder(desired[id],history).filter(slug => revoking ? !desired[id]?.[slug] : !!desired[id]?.[slug])) {
+        try {
         const want = desired[id]?.[slug] ?? null
         const record = history[slug]
         const actual = current.get(slug) ?? null
-        if (record && !same(actual,record.applied) && !(Object.hasOwn(record,'pending') && same(actual,record.pending))) throw Error('连接器配备已由其他页面修改')
-        const next = want ?? record?.previous ?? null
-        if (want) {
+        const transition = planAccountConnector(actual,want,record,options.accountResolutions?.[id]?.[slug])
+        if (transition.conflict) throw Error('连接器配备已由其他页面修改')
+        const next = transition.next
+        if (want && !transition.keepExternal) {
           const status = await call(['mcp','catalog','status',slug])
           if ((status.status ?? status.connection?.status) !== 'connected') throw Error('账户连接器尚未连接')
           const tools = new Set(toolRows(await call(['mcp','catalog','tools',slug])).map(x => x.slug))
           if (!want.allow.length || [...want.allow,...(want.deny ?? [])].some(x => !tools.has(x))) throw Error('工具权限无效或已变化')
         }
         if (!same(actual,next)) {
+          const latest = policyRows(await call(['agent','connector','list',id])).find(x => x.slug === slug) ?? null
+          if (!same(actual,latest)) throw Error('核对期间工具权限已变化，请刷新后重试')
           // Save the intended transition before the mutation. A lost CLI
           // response is reconciled against pending on the next round.
-          history[slug] = {...(record ?? {previous:comparable(actual),applied:comparable(actual)}),pending:comparable(next)}
+          history[slug] = {...(record ?? {previous:comparable(actual),applied:comparable(actual)}),...(transition.resolved ? {revision:randomUUID()} : {}),pending:comparable(next)}
           await save()
           if (next) {
             await call(['agent','connector',actual ? 'update' : 'add',id,slug,'--allow',next.allow.join(','),...(next.deny?.length ? ['--deny',next.deny.join(',')] : [])])
@@ -47,12 +53,19 @@ export async function syncAccountConnectors({options,state,run,save}) {
           const verified = policyRows(await call(['agent','connector','list',id])).find(x => x.slug === slug) ?? null
           if (!same(verified,next)) throw Error('连接器保存结果尚未核实')
         }
-        if (want) history[slug] = {previous:record ? record.previous : comparable(actual),applied:comparable(want)}
+        if (want || transition.keepExternal) history[slug] = {previous:transition.keepExternal ? comparable(actual) : record ? record.previous : comparable(actual),applied:comparable(next),...(transition.resolved ? {revision:randomUUID()} : history[slug]?.revision ? {revision:history[slug].revision} : {})}
         else delete history[slug]
         await save()
+        } catch (error) {
+          failures.push({botId:id,slug,reason:error.message})
+        }
       }
-      if (!Object.keys(history).length) delete owned[id]
-    } catch { failures.push(id) }
+      if (!Object.keys(history).length) { delete owned[id]; await save() }
+    } catch (error) { skipped.add(id); failures.push({botId:id,slug:null,reason:error.message}) }
   }
-  if (failures.length) throw Error(`${failures.length} 个 Bot 的账户连接器分配待处理`)
+  if (failures.length) {
+    const error = Error(`${failures.length} 项账户连接器分配待处理`)
+    error.failures = failures
+    throw error
+  }
 }
