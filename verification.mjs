@@ -28,12 +28,29 @@ export async function verifyConfiguration({options, state, run, paths, report = 
       if(match)instructionBase=match[1];
     } else instructionBase='';
   } catch {}
-  await mapLimit(Object.entries(state.total?.profiles ?? {}), 4, async ([id, owned]) => {
-    if(options.syncInstructions === false) { add('instructions',id,'skipped'); return; }
-    const data=await read(['agent','get',id]),bot=data?.agent??data;
-    const text=[instructionBase??'',options.botInstructions?.[id]??''].filter(Boolean).join('\n\n').trim();
+  const ownedProfiles=state.total?.profiles ?? {};
+  const instructionTargets=new Set();
+  const instructionsEnabled=options.syncInstructions !== false;
+  if(instructionsEnabled && (instructionBase !== '' || Object.values(options.botInstructions ?? {}).some(Boolean))) {
+    const roster=await read(['agent','list']);
+    const validRoster=Array.isArray(roster) || Array.isArray(roster?.agents) || Array.isArray(roster?.bots);
+    if(!validRoster) add('instructions','global','unknown');
+    else for(const bot of list(roster,['agents','bots'])) {
+      const selected=options.targetAgents?.length ? options.targetAgents.includes(bot.id) : bot.modelPreference?.connectionSlug===options.connectionSlug;
+      if(selected)instructionTargets.add(bot.id);
+    }
+  }
+  await mapLimit([...new Set([...Object.keys(ownedProfiles),...instructionTargets])], 4, async id => {
+    if(!instructionsEnabled) { add('instructions',id,'skipped'); return; }
+    const data=await read(['agent','get',id]),bot=data?.agent??data,owned=ownedProfiles[id];
+    const selected=bot && (options.targetAgents?.length ? options.targetAgents.includes(id) : bot.modelPreference?.connectionSlug===options.connectionSlug);
+    const text=selected ? [instructionBase??'',options.botInstructions?.[id]??''].filter(Boolean).join('\n\n').trim() : '';
     const expected=text ? `\n\n<!-- magpie-ducoro-total:begin -->\n${text}\n<!-- magpie-ducoro-total:end -->\n` : '';
-    add('instructions',id,instructionBase===null || !bot || bot.id!==id || typeof bot.profile!=='string' ? 'unknown' : expected && bot.profile.includes(expected) && (owned.pending??owned.block)===expected ? 'verified' : 'failed');
+    const unknown=(selected && instructionBase===null) || !bot || bot.id!==id || typeof bot.profile!=='string';
+    const profile=typeof bot?.profile==='string' ? bot.profile : '';
+    const matches=expected ? profile.includes(expected) && (owned?.pending??owned?.block)===expected
+      : !profile.includes('<!-- magpie-ducoro-total:begin -->') && !profile.includes('<!-- magpie-ducoro-total:end -->');
+    add('instructions',id,unknown ? 'unknown' : matches ? 'verified' : 'failed');
   });
   const desired=options.syncMcp ? options.accountConnectors??{} : {};
   await mapLimit([...new Set([...Object.keys(state.accountConnectors??{}),...Object.keys(desired)])], 4, async id => {

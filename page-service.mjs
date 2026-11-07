@@ -272,16 +272,24 @@ export async function createPageService({
           }
           const result=await rollbackDraft(stateDir,value.id,value.selections,options);
           const loaded=await readManagedState(join(stateDir,'state.json'));
-          const drift=await inspectDrift({options,state:loaded.state,paths,run,signal:requestController.signal});
-          // Model restoration requires a fresh, successful read of every affected Bot.
           const next=globalThis.DucoroPlans.resolve(result.options),current=globalThis.DucoroPlans.resolve(options);
-          const affectsAll=result.changes.some(x=>['modelScope','connectionSlug','syncAgentModels'].includes(x.key));
-          const targets=new Set([...Object.keys(next.botModels??{}),...Object.keys(current.botModels??{})].filter(id=>next.botModels[id]!==current.botModels[id]));
-          if((affectsAll||targets.size) && (drift.unknown || [...targets].some(id=>!drift.rows.some(r=>r.feature==='models'&&r.target===id&&r.status==='same')) || (affectsAll&&drift.rows.some(r=>r.feature==='models'&&r.status!=='same'))))return reply(409,{error:'Current model configuration has changed or cannot be verified; resolve drift first'});
+          // Inspect resumed and newly targeted Bots too, even when current
+          // settings exclude them from normal drift reporting.
+          const drift=await inspectDrift({options:{...options,connectionSlug:next.connectionSlug,pausedModels:[],targetAgents:[]},state:loaded.state,paths,run,signal:requestController.signal});
+          const manages = id => next.syncConnection !== false && next.syncAgentModels !== false
+            && !(next.pausedModels ?? []).includes(id)
+            && (!(next.targetAgents?.length) || next.targetAgents.includes(id));
+          const affectsAll=next.syncConnection !== false && next.syncAgentModels !== false && result.changes.some(x=>['modelScope','connectionSlug','syncAgentModels','syncConnection','targetAgents'].includes(x.key));
+          const targets=new Set([
+            ...[...new Set([...Object.keys(next.botModels??{}),...Object.keys(current.botModels??{})])].filter(id=>next.botModels[id]!==current.botModels[id]),
+            ...(current.pausedModels ?? []).filter(id=>!(next.pausedModels ?? []).includes(id)),
+          ].filter(manages));
+          const affectedRows=drift.rows.filter(r=>r.feature==='models' && manages(r.target) && (affectsAll||targets.has(r.target)));
+          if((affectsAll||targets.size) && (drift.unknown || [...targets].some(id=>!affectedRows.some(r=>r.target===id&&r.status==='same')) || affectedRows.some(r=>r.status!=='same')))return reply(409,{error:'Current model configuration has changed or cannot be verified; resolve drift first'});
           let source;try {source=JSON.parse(await readFile(paths.bridge,'utf8'));}catch{}
           const fallback=typeof source?.model==='string'?source.model:source?.model?.id;
           result.options.modelGuards ??= {};
-          for(const row of drift.rows.filter(row=>row.feature==='models' && row.revision && (affectsAll||targets.has(row.target)))) {
+          for(const row of affectedRows.filter(row=>row.revision)) {
             const model=next.modelScope==='agents' ? next.botModels?.[row.target]??fallback : fallback;
             if(!model)return reply(409,{error:'Cannot verify the restoration model'});
             result.options.modelGuards[row.target]={revision:row.revision,model};

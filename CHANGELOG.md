@@ -2,9 +2,13 @@
 
 ## 0.4.2 — 2026-11-07
 
-0.4.2 带来更高效的同步与更灵活的 Bot 配置管理。增量同步、技能缓存和并发核验减少重复处理；新增配置方案支持多个 Bot 持续继承与单项覆盖。同步进度、模型漂移检测、逐项核验和选择性配置回退，让每次变更更清晰、更可控。同时完善中英文界面，切换语言保留未保存草稿。升级可沿用现有设置与管理记录；配置核验结果不代表运行中的会话已加载更新。
+0.4.2 带来更高效的同步与更灵活的 Bot 配置管理。增量同步、技能缓存和并发核验减少重复处理，配置方案支持多个 Bot 持续继承并保留单项覆盖。新增同步进度、模型漂移检测、逐项核验与选择性配置回退，并完善恢复模型管理时的漂移保护和缺失指令核验，让每次变更更清晰、更可靠。界面完整支持中英文，切换语言保留未保存草稿；升级沿用现有设置与管理记录，无需重新配置。
 
-0.4.2 delivers more efficient synchronization and more flexible Bot configuration management. Incremental sync, skill caching, and concurrent verification reduce repeated work, while reusable configuration plans let multiple Bots inherit updates with individual overrides. Sync progress, model drift detection, item-level verification, and selective configuration restore make changes easier to understand and manage. Improved English and Chinese localization preserves unsaved drafts when switching languages. Existing settings and management records carry forward on upgrade; configuration verification does not confirm that running sessions have loaded the updates.
+Version 0.4.2 makes synchronization more efficient and Bot configuration more flexible. Incremental sync, skill caching and concurrent verification reduce repeated work, while reusable configuration plans let multiple Bots inherit updates with individual overrides. Sync progress, model drift detection, item-level verification and selective configuration restore make changes easier to follow. This release also strengthens drift protection when resuming model management and detects missing instructions during verification. The interface supports Chinese and English while preserving unsaved drafts when switching languages. Existing settings and management records carry forward without reconfiguration.
+
+- 修复检查点解除模型暂停、扩大目标范围或重新启用连接同步时遗漏漂移检查的问题；正常回退附加写前配置摘要保护。
+- 指令核验覆盖期望目标与已有管理记录，首次写入失败不再漏报；目标目录不可读时明确显示待核实。
+- 使用本机 Ducoro 的真实 Bot 完成只读修复前后对照，补充回退接口与指令核验自动回归。
 
 - 补齐新增控制台的动态状态、漂移结果、检查点字段/日期、错误提示及无障碍标签国际化；核验接口按请求语言返回说明，保留结构化状态。新增双语切换与接口语言测试。
 
