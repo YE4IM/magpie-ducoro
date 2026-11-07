@@ -162,3 +162,15 @@ html.language-pending body { visibility: hidden; }
 .preview-bot button { margin:8px 8px 0 0; }
 .bot-comparison { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
 @media(max-width:600px) { .comparison-grid{grid-template-columns:1fr} .preview-dialog {padding:16px} .save-bar>div{flex-wrap:wrap} }
+
+/* Share heading, source and control rows so descriptions never shift a column. */
+@media (min-width: 901px) {
+  .resource-grid { row-gap: 0; align-items: start; }
+  .resource-field { display: grid; grid-template-rows: subgrid; grid-row: span 4; }
+  .resource-field > h3, .resource-field > .resource-heading { grid-row: 1; }
+  .resource-field > .source-label { grid-row: 2; }
+  .resource-field > select { grid-row: 3; width: 100%; min-width: 0; }
+  .resource-field > .resource-notes { grid-row: 4; min-width: 0; }
+  .resource-heading { flex-wrap: wrap; }
+  .account-actions { flex-wrap: wrap; }
+}

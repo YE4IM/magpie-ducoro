@@ -1,5 +1,18 @@
 # 更新记录
 
+## 0.4.1 — 2026-11-07
+
+0.4.1 专注打磨现有功能，让同步更稳定、操作更顺畅。新版优化多 Bot 预览的并发读取、超时与取消处理，设置读取完成即可编辑；完善按钮忙碌状态、未保存草稿保护和同步结果反馈，刷新诊断时保留上一份结果。同时修复 Bot 资源卡片三列控件错位，完善自动跟随 Magpie 语言的中英文界面。升级可沿用现有设置与管理记录，无需重新配置。
+
+0.4.1 refines existing features for more reliable synchronization and smoother everyday use. It improves concurrent preview reads, timeouts and cancellation across multiple Bots, while making settings editable as soon as they load. Clearer busy states, unsaved-draft protection and sync feedback make changes easier to manage, and diagnostic refreshes retain the previous results. This release also aligns the three columns of Bot resource controls and improves the Chinese and English interface that follows Magpie’s language. Existing settings and ownership records remain compatible, so no reconfiguration is required.
+
+- 限制账户权限预览的并发读取与等待时间，取消请求时停止相关读取。
+- 设置、资源与目录独立加载；统一忙碌状态并阻止旧响应覆盖草稿。
+- 重新读取前确认放弃草稿；保存反馈依据同步状态更新，诊断刷新保留旧结果。
+- 修复 Bot 卡片三列控件对齐，适配英文换行与窄窗口。
+- 整理命令执行与数据投影模块，解除循环依赖。
+- 发布目录与压缩包移除测试脚本及过程记录，保留运行文件和必要项目文档。
+
 ## 0.4.0 — 2026-11-07
 
 0.4.0 新增逐 Bot 变更预览与保存前确认，可在应用设置前查看模型、连接器、技能分配及账户工具权限的变化，并对照 Magpie 期望与 Ducoro 当前状态。账户权限冲突支持保留 Ducoro 当前配置或重新应用 Magpie 设置，配合分项能力检测、撤销优先和故障隔离，让同步更清晰、更可靠。新版还完善了管理记录保护与监听恢复，提供自动跟随 Magpie 语言的完整中英文界面，切换语言时保留未保存的草稿。

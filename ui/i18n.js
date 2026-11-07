@@ -2,6 +2,16 @@
 // Only plugin-authored strings are translated; names and values are interpolation arguments.
 (() => {
   const ENGLISH = {
+  "部分 Bot 的账户权限未能在时限内读取，请刷新后重新预览。": "Account permissions for some Bots could not be read within the time limit. Refresh and preview again.",
+  "预览读取超时，请稍后重试。": "The preview timed out. Try again shortly.",
+  "预览请求已取消": "The preview request was cancelled.",
+  "放弃未保存的修改？": "Discard unsaved changes?",
+  "重新读取会用已保存设置替换当前草稿。": "Reloading will replace your draft with the saved settings.",
+  "放弃修改并重新读取": "Discard changes and reload",
+  "设置已保存，本轮同步已结束，仍有待处理项，请查看同步诊断。": "Settings saved. This sync round has finished with pending items. Check Sync diagnostics.",
+  "设置已保存，本轮同步已结束，请查看同步诊断确认结果。": "Settings saved. This sync round has finished. Check Sync diagnostics for the results.",
+  "设置已保存，同步结果尚未确认，请稍后查看同步诊断。": "Settings saved. Sync results are not yet confirmed. Check Sync diagnostics shortly.",
+
   "网关连接": "Gateway connection",
   "同步连接地址、密钥与模型目录": "Sync the connection address, key and model catalog",
   "Bot 模型跟随": "Follow Bot models",
