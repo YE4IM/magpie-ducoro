@@ -577,8 +577,10 @@
           if (issue.targets.length) { DucoroResources.focusBot(issue.targets[0]); void DucoroResources.refresh(); }
           else document.getElementById(issue.feature === "models" ? "references" : "switches")?.scrollIntoView({ behavior: "smooth" });
         });
-        el.append(go);
-        if (issue.feature === "models") { const mapping = node("button", t("调整模型映射"), "secondary"); mapping.onclick = () => { setTab("settings"); $("references").closest("details").open = true; $("references").scrollIntoView(); }; el.append(mapping); }
+        const actions = node("div", undefined, "button-group action-row");
+        actions.append(go);
+        if (issue.feature === "models") { const mapping = node("button", t("调整模型映射"), "secondary"); mapping.onclick = () => { setTab("settings"); $("references").closest("details").open = true; $("references").scrollIntoView(); }; actions.append(mapping); }
+        el.append(actions);
         $("report-issues").append(el);
       }
       message(
