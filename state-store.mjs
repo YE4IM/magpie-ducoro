@@ -115,19 +115,25 @@ export function validateState(raw) {
 }
 // The sync.lock owner serializes writers, including checkpoint/cleanup operations.
 // Snapshot sequence numbers make a crash between snapshot and journal rotation safe.
+export const stateMetrics = { snapshotBytes: 0, journalBytes: 0, backupBytes: 0, writes: 0 };
 const cache = new Map();
 const queues = new Map();
 const digest = value => createHash('sha256').update(value).digest('hex');
 const empty = () => ({v:2,connection:null,mcp:{},skills:{},accountConnectors:{}});
 const optional = async file => readFile(file,'utf8').catch(e=>{if(e.code==='ENOENT')return null;throw e;});
 const stamp = async file => Promise.all([file,file+'.journal'].map(async p=>{try {const s=await stat(p);return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;}catch(e){if(e.code==='ENOENT')return '';throw e;}})).then(x=>x.join('|'));
-const serial = (file,work) => {const task=(queues.get(file)??Promise.resolve()).then(work);queues.set(file,task.catch(()=>{}));return task;};
+const serial = (file,work) => {const task=(queues.get(file)??Promise.resolve()).then(work);const tail=task.catch(()=>{});queues.set(file,tail);void tail.then(()=>{if(queues.get(file)===tail)queues.delete(file);});return task;};
 async function atomic(file,body) {
   await mkdir(dirname(file),{recursive:true,mode:0o700});
   const temp=file+'.'+randomUUID()+'.tmp';
   try {
     const h=await open(temp,'wx',0o600);
-    try {await h.writeFile(body);await h.sync();}finally{await h.close();}
+    try {
+      await h.writeFile(body);
+      const key=file.endsWith('.journal')?'journalBytes':file.includes('state-backups/')?'backupBytes':'snapshotBytes';
+      stateMetrics[key]+=Buffer.byteLength(body);stateMetrics.writes++;
+      await h.sync();
+    }finally{await h.close();}
     await rename(temp,file);
     const dir=await open(dirname(file),'r');try{await dir.sync();}finally{await dir.close();}
   }finally{await unlink(temp).catch(()=>{});}
@@ -174,7 +180,7 @@ export async function readManagedState(file) {
         apply(state,row.changes);seq=row.seq;count++;
       }
       state._journalSeq=seq;validateState(state);
-      cache.set(file,{state:structuredClone(state),stamp:before,count,bytes:Buffer.byteLength(journal)-Buffer.byteLength(tail),tail:!!tail});
+      cache.set(file,{state:structuredClone(state),stamp:before,exists:body!==null,count,bytes:Buffer.byteLength(journal)-Buffer.byteLength(tail),tail:!!tail});
       return {status:body!==null?'ready':'missing',state};
     } catch(error) {
       throw Object.assign(Error(error.code==='state-version'?error.message:'管理记录已损坏；原文件已保留，请恢复备份后重新读取。'),{code:error.code??'state-corrupt'});
@@ -200,23 +206,70 @@ async function compact(file,state,keepBackup=true) {
   }
   await atomic(file,body);
   await atomic(file+'.journal','');
-  cache.set(file,{state:structuredClone(state),stamp:await stamp(file),count:0,bytes:0,tail:false});
+  cache.set(file,{state:structuredClone(state),stamp:await stamp(file),exists:true,count:0,bytes:0,tail:false});
 }
-export function saveManagedState(file,state) {
-  const next=JSON.parse(JSON.stringify(state));validateState(next);
+// Explicit paths capture only operation intent. All other callers retain full
+// validation and saving, including resource changes made before operation finish.
+export function saveManagedState(file,state,{paths}={}) {
+  let captured;
+  if (paths) {
+    captured = paths.map(path => {
+      if (!Array.isArray(path) || !path.length || path.some(k => typeof k !== 'string' || ['__proto__','constructor','prototype','_journalSeq'].includes(k))) throw Error('Invalid state save path');
+      let value = state;
+      for (const key of path) value = value != null && Object.hasOwn(value,key) ? value[key] : undefined;
+      return value === undefined ? {path,remove:true} : {path,value:JSON.parse(JSON.stringify(value))};
+    });
+  } else {
+    captured=JSON.parse(JSON.stringify(state));validateState(captured);
+  }
   return serial(file,async()=>{
-    const entry=await current(file);
-    next._journalSeq=entry.state._journalSeq??0;
-    const changes=delta(entry.state,next);
+    let entry=await current(file);
+    let next, changes;
+    if (paths) {
+      next={...entry.state};
+      // Copy ancestors only: cached, validated branches remain immutable.
+      for (const change of captured) {
+        let parent=next;
+        for (const key of change.path.slice(0,-1)) {
+          if (!object(parent[key])) {
+            if (parent[key] !== undefined) throw Error('Invalid state save parent');
+            parent[key]={};
+          } else parent[key]={...parent[key]};
+          parent=parent[key];
+        }
+        if (change.remove) delete parent[change.path.at(-1)];
+        else parent[change.path.at(-1)]=change.value;
+      }
+      const roots=new Set(captured.map(c=>c.path[0]));
+      validateState({...empty(),...Object.fromEntries([...roots].map(k=>[k,next[k]]))});
+      changes=[];
+      const missingParent=captured.some(change => {
+        let parent=entry.state;
+        for(const key of change.path.slice(0,-1)) {parent=parent?.[key];if(!object(parent))return true;}
+        return false;
+      });
+      for (const change of missingParent ? [] : captured) {
+        let before=entry.state,after=next;
+        for (const key of change.path) { before=before?.[key];after=after?.[key]; }
+        if (change.remove) { if(before!==undefined)changes.push(change); }
+        else delta(before,after,change.path,changes);
+      }
+      if(missingParent)changes=delta(entry.state,next);
+    } else {
+      next=captured;
+      next._journalSeq=entry.state._journalSeq??0;
+      changes=delta(entry.state,next);
+    }
     if(!changes.length)return;
     await mkdir(dirname(file),{recursive:true,mode:0o700});
-    if(!await optional(file))await compact(file,entry.state,false);
-    const payload=JSON.stringify({seq:next._journalSeq+1,changes});
+    if(!entry.exists) { await compact(file,entry.state,false);entry=cache.get(file); }
+    const seq=(entry.state._journalSeq??0)+1;
+    const payload=JSON.stringify({seq,changes});
     const line=JSON.stringify({payload,checksum:digest(payload)})+'\n';
     const h=await open(file+'.journal','a+',0o600);
-    try {if(entry.tail)await h.truncate(entry.bytes);await h.writeFile(line);await h.sync();}finally{await h.close();}
-    next._journalSeq++;
-    const updated={state:next,stamp:await stamp(file),count:entry.count+1,bytes:entry.bytes+Buffer.byteLength(line),tail:false};
+    try {if(entry.tail)await h.truncate(entry.bytes);await h.writeFile(line);stateMetrics.journalBytes+=Buffer.byteLength(line);stateMetrics.writes++;await h.sync();}finally{await h.close();}
+    next._journalSeq=seq;
+    const updated={state:next,stamp:await stamp(file),exists:true,count:entry.count+1,bytes:entry.bytes+Buffer.byteLength(line),tail:false};
     cache.set(file,updated);
     if(updated.count>=128||updated.bytes>=1024*1024)await compact(file,next);
   });

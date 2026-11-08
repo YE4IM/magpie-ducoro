@@ -106,10 +106,12 @@
     "skill-artifacts.mjs",
     "operation-store.mjs",
     "local-records.mjs",
-    "backup-files.mjs"
+    "backup-files.mjs",
+    "scripts/compact-state.mjs"
   ],
   "scripts": {
-    "diagnostics": "node diagnostics-cli.mjs"
+    "diagnostics": "node diagnostics-cli.mjs",
+    "state:compact": "node scripts/compact-state.mjs"
   },
   "bin": {
     "magpie-ducoro-status": "./diagnostics-cli.mjs"

@@ -30,7 +30,7 @@ import { createReadCoordinator, createProgress } from "./performance.mjs"
 // This file must export exactly one plugin function (plus _internal helpers).
 
 import { createPageService } from "./page-service.mjs"
-import { readManagedState, saveManagedState, compactManagedState } from "./state-store.mjs"
+import { readManagedState, saveManagedState } from "./state-store.mjs"
 import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
 import { syncAccountConnectors } from "./account-connectors.mjs"
 import { createCommandRunner } from "./command-runner.mjs"
@@ -327,20 +327,15 @@ const createEngine = (input = {}, options = {}) => {
     stateLoaded = true
   }
 
-  let stateSaveQueue = Promise.resolve()
-  const saveState = () => {
-    const task = stateSaveQueue.then(async () => {
+  const saveState = async (paths) => {
     if (dryRun) return
     try {
-      await mkdir(stateDir, { recursive: true })
-      await saveManagedState(stateFile, state)
+      // The store captures values now and serializes durable writes itself.
+      await saveManagedState(stateFile, state, { paths })
     } catch (e) {
       log("cannot save state:", e?.message ?? e)
       throw e
     }
-    })
-    stateSaveQueue = task.catch(() => {})
-    return task
   }
 
   const operations = createOperationStore({ getState: () => state, save: saveState })
@@ -1388,7 +1383,7 @@ const createEngine = (input = {}, options = {}) => {
         for (const feature of roundFeatures ?? ['all']) dirtyFeatures.add(feature)
         for (const path of roundSkillPaths ?? []) dirtySkillPaths.add(path)
       }
-      if (!dryRun && stateLoaded) { if (!roundFeatures && !pending && !retryRequested) await operations.retire(null); await maintainLocalRecords(stateDir,state,saveState); await compactManagedState(stateFile) }
+      if (!dryRun && stateLoaded) { if (!roundFeatures && !pending && !retryRequested) await operations.retire(null); await maintainLocalRecords(stateDir,state,saveState) }
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {

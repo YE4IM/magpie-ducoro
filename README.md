@@ -1,5 +1,7 @@
 # Ducoro 0.4.3
 
+Version 0.4.3 focuses on sync efficiency, reliability, and backup management. Shared skill caching, deduplicated reads, incremental saves, and per-target retries reduce repeated work and disk writes when syncing multiple Bots, while stronger cancellation, timeout handling, and recovery improve resilience. A centralized backup page brings together management-record backups and configuration checkpoints, with external backup import, restore previews, selective configuration rollback, and local record cleanup. This release also refines sync diagnostics, English and Chinese interfaces, and narrow-screen layouts, and fixes diagnostic state being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
+
 ## Import and clear local backups
 
 Both **Valid backups and restore preview** and **Configuration checkpoints and selective restore** in Sync diagnostics now provide **Import external file** and **Clear local backups**.
@@ -21,15 +23,14 @@ Replace the previous plugin path or package when upgrading. Keep existing manage
 ## What's new in 0.4.3
 
 - **Shared skill artifacts:** prepare and validate each skill name/content version once, then reuse it for authorized Bots. Each target retains its own permission checks, import and replacement recovery.
-- **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records, at 1 MiB, or at the end of a sync round. Keep up to five state backups.
+- **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records or at 1 MiB. Small changes remain journaled across sync rounds; explicit maintenance can also compact them. Keep up to five state backups.
 - **Operation-level retries:** record each target's desired revision, dependencies, status and attempt count. Automatic retries schedule affected features and skip completed operations at the same revision. Failed or interrupted operations reconcile actual state before recovery. Full manual and periodic syncs still check external changes.
 - **Local record cleanup:** open **Sync diagnostics → Local record management → Clean up local records**. Review the counts and storage estimate, then confirm. Cleanup removes completed operation history, old state backups and unused skill caches, and compacts incremental records. It retains current ownership, permission recovery data, unfinished operations and skill versions in use. Sync and cleanup share a lock; an outdated preview must be refreshed.
 - **Bounded retention:** retain up to 500 completed operation records and reclaim unused skill caches older than seven days after sync. Configuration checkpoints retain their existing 20-item limit and are not deleted by this cleanup action.
 - **English and Chinese:** cleanup previews, confirmations, results and errors follow the host language. Switching languages preserves open dialogs and preview values. Bot names, resource names and technical identifiers are unchanged.
 
-Stop the old plugin host before loading 0.4.3; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, let 0.4.3 finish synchronization and snapshot compaction, then stop its host. After an interrupted run, recover with 0.4.3 first. Do not manually delete an uncompacted journal.
+Stop the old plugin host before loading 0.4.3; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, stop the 0.4.3 host, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge its journal under the shared lock. After an interrupted run, recover with 0.4.3 first. Do not manually delete an uncompacted journal.
 
-An isolated 100-Bot storage benchmark reduced logical writes from 83,688,798 to 859,120 bytes (about 98.97%). Durable journal flushing increased the storage-only time from 260 to 643 ms. These figures do not establish end-to-end sync speed.
 
 ## Features introduced in 0.4.2
 
@@ -121,6 +122,6 @@ MIT
 
 Incremental feature scheduling, bounded file caching and read deduplication reduce repeated work. Model updates and account verification use bounded concurrency. Bot configuration plans support ongoing inheritance with explicit overrides. Diagnostics adds live step timing, model drift actions and selective configuration checkpoint restoration into drafts.
 
-Checkpoints capture desired plugin settings, not skill bodies or running sessions. Model restoration rechecks the reviewed configuration before writing. Unsupported content readback remains unverified. Synthetic benchmarks use simulated CLI latency and are not live-service performance claims.
+Checkpoints capture desired plugin settings, not skill bodies or running sessions. Model restoration rechecks the reviewed configuration before writing. Unsupported content readback remains unverified.
 
 The new plan, progress, drift and checkpoint controls are localized in English and Chinese, including live statuses, dates, errors and accessibility labels. Switching the host language retains drafts and original resource names. Verification responses localize messages while preserving structured status codes.

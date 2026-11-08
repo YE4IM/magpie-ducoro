@@ -12,8 +12,10 @@ export async function mapLimit(items, limit, work, { signal } = {}) {
   }));
   // Keep the caller's mutation lock until every already-started worker settles.
   if (failed) throw failure;
+  if (signal?.aborted) throw abortError();
   return results;
 }
+const abortError = () => Object.assign(new Error('request cancelled'), { name: 'AbortError' });
 export function createReadCoordinator(run) {
   const flights = new Map(); let generation = 0;
   const metrics = { calls: 0, shared: 0, durationMs: 0 };
@@ -22,13 +24,41 @@ export function createReadCoordinator(run) {
     (args[0] === 'agent' && ['connector','mcp','skill'].includes(args[1]) && args[2] === 'list');
   const execute = async (args, options) => { metrics.calls++; const start = performance.now(); try { return await run(args, options); } finally { metrics.durationMs += performance.now() - start; } };
   const coordinated = (args, options = {}) => {
-    // Signals belong to individual consumers: do not let one cancel another.
+    if (options.signal?.aborted) return Promise.reject(abortError());
     if (!isRead(args)) { generation++; flights.clear(); return execute(args, options); }
-    if (options.signal || options.stdin !== undefined) return execute(args, options);
-    const key = JSON.stringify([generation,args,options.timeoutMs]);
-    if (flights.has(key)) { metrics.shared++; return flights.get(key).then(structuredClone); }
-    const pending = execute(args, options).finally(() => { if (flights.get(key) === pending) flights.delete(key); });
-    flights.set(key, pending); return pending.then(structuredClone);
+    // Unknown execution options must not accidentally share a different read.
+    if (options.stdin !== undefined || Object.keys(options).some(k => !['signal','timeoutMs','maxOutputBytes'].includes(k))) return execute(args, options);
+    const key = JSON.stringify([generation,args,options.timeoutMs === undefined ? 90_000 : options.timeoutMs,options.maxOutputBytes === undefined ? 8 * 1024 * 1024 : options.maxOutputBytes]);
+    let flight = flights.get(key);
+    if (flight) metrics.shared++;
+    else {
+      flight = { controller: new AbortController(), subscribers: 0 };
+      flights.set(key, flight);
+      const active = flight;
+      active.pending = Promise.resolve().then(() => execute(args, { ...options, signal: active.controller.signal })).finally(() => {
+        if (flights.get(key) === active) flights.delete(key);
+      });
+    }
+    const active = flight;
+    active.subscribers++;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener('abort', cancel);
+        if (--active.subscribers === 0) {
+          if (flights.get(key) === active) flights.delete(key);
+          active.controller.abort();
+        }
+        if (error) reject(error);
+        else { try { resolve(structuredClone(value)); } catch (e) { reject(e); } }
+      };
+      const cancel = () => finish(abortError());
+      active.pending.then(value => finish(null, value), error => finish(error));
+      options.signal?.addEventListener('abort', cancel, { once: true });
+      if (options.signal?.aborted) cancel();
+    });
   };
   coordinated.metrics = () => ({ ...metrics });
   return coordinated;

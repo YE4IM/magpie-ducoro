@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import { spawn as nodeSpawn } from "node:child_process";
 
 // Shared command lifecycle; secrets stay in the bridge redaction context.
@@ -9,8 +10,11 @@ export function createCommandRunner({
   getGatewaySignal,
   gatewayAbortError,
 }) {
-  return (args, { stdin, timeoutMs = 90_000, signal } = {}) =>
+  return (args, { stdin, timeoutMs = 90_000, maxOutputBytes = 8 * 1024 * 1024, signal } = {}) =>
     new Promise((resolve, reject) => {
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1) {
+        reject(new RangeError("Invalid command timeout or output limit")); return;
+      }
       const gatewaySignal =
         args[0] === "connections" ? getGatewaySignal() : null;
       if (gatewaySignal?.aborted) {
@@ -84,13 +88,18 @@ export function createCommandRunner({
       }
       let stdout = "";
       let stderr = "";
-      let timedOut = false;
+      let outputBytes = 0;
+      let outputLimited = false;
+      const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
       let aborted = false;
       let done = false;
       const finish = (code) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.stdin?.destroy();
         if (abortableRead) gatewaySignal.removeEventListener("abort", onAbort);
         signal?.removeEventListener("abort", onAbort);
         if (aborted) {
@@ -103,9 +112,11 @@ export function createCommandRunner({
           );
           return;
         }
+        stdout += decoders.stdout.end();
+        stderr += decoders.stderr.end();
         let json = null;
         try {
-          json = JSON.parse(stdout.trim());
+          if (!outputLimited) json = JSON.parse(stdout.trim());
         } catch {}
         resolve({ ok: code === 0, code, stdout, stderr, json });
       };
@@ -116,18 +127,26 @@ export function createCommandRunner({
         } catch {}
         finish(-1);
       };
-      const timer = setTimeout(() => {
-        timedOut = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-      }, timeoutMs);
-      child.stdout?.on("data", (d) => {
-        stdout += d;
-      });
-      child.stderr?.on("data", (d) => {
-        stderr += d;
-      });
+      const stop = (message) => {
+        if (done) return;
+        stderr = message + "\n" + stderr;
+        try { child.kill("SIGKILL"); } catch {}
+        // Descendants may retain stdout/stderr after the direct child exits.
+        // Settle on our deadline and close local pipes without waiting for close.
+        finish(-1);
+      };
+      const timer = setTimeout(() => stop(`timed out after ${timeoutMs} ms`), timeoutMs);
+      const append = (stream, data) => {
+        if (done) return;
+        const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        const remaining = maxOutputBytes - outputBytes;
+        const text = decoders[stream].write(bytes.subarray(0, remaining));
+        if (stream === 'stdout') stdout += text; else stderr += text;
+        outputBytes += Math.min(bytes.length, remaining);
+        if (bytes.length > remaining) { outputLimited = true; stop(`output exceeded ${maxOutputBytes} bytes`); }
+      };
+      child.stdout?.on("data", d => append('stdout', d));
+      child.stderr?.on("data", d => append('stderr', d));
       child.on("error", (e) => {
         stderr = String(e?.message ?? e);
         finish(-1);
@@ -139,18 +158,11 @@ export function createCommandRunner({
         onAbort();
       // A CLI that exits before reading stdin must not crash the shared host.
       child.stdin?.on("error", (e) => {
-        stderr += `\n${e.message}`;
+        if (!done) append("stderr", Buffer.from(`\n${e.message}`));
       });
       if (stdin !== undefined) {
         child.stdin.end(stdin + "\n");
       }
-      child.on("close", (code) => {
-        if (timedOut) {
-          stderr = `timed out after ${timeoutMs} ms\n` + stderr;
-          finish(-1);
-        } else {
-          finish(code ?? -1);
-        }
-      });
+      child.on("close", (code) => finish(code ?? -1));
     });
 }

@@ -13,7 +13,7 @@ export function createOperationStore({getState,save}) {
       const old=state.operations[id],hash=revision(desired);
       if(retryOnly&&old?.status==='completed'&&old.revision===hash)return null;
       state.operations[id]={feature,target,resource,revision:hash,dependencies,status:'running',attempts:old?.revision===hash?(old.attempts??0)+1:1,updatedAt:new Date().toISOString()};
-      await save();return id;
+      await save([['operations',id]]);return id;
     },
     async finish(id,success=true){if(!id)return;const row=getState().operations?.[id];if(!row)return;row.status=success?'completed':'failed';row.updatedAt=new Date().toISOString();await save();},
     async retire(features) {
