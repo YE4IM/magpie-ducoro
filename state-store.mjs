@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, open, mkdir, rename, unlink, readdir, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 const object = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const policy = (x) =>
   x === null ||
@@ -13,6 +15,8 @@ export function validateState(raw) {
       Error("管理记录版本未知，请恢复兼容的备份后重新读取。"),
       { code: "state-version" },
     );
+  if(raw._journalSeq !== undefined && (!Number.isSafeInteger(raw._journalSeq)||raw._journalSeq<0))throw Error('管理记录序号无效');
+  if(raw.operations !== undefined && (!object(raw.operations)||Object.values(raw.operations).some(row=>!object(row)||!['running','failed','completed'].includes(row.status))))throw Error('操作恢复记录损坏');
   for (const key of ["mcp", "skills", "accountConnectors"])
     if (raw[key] !== undefined && !object(raw[key]))
       throw Error("管理记录格式损坏");
@@ -109,62 +113,127 @@ export function validateState(raw) {
     accountConnectors: raw.accountConnectors ?? {},
   };
 }
-export async function readManagedState(file) {
-  let value;
+// The sync.lock owner serializes writers, including checkpoint/cleanup operations.
+// Snapshot sequence numbers make a crash between snapshot and journal rotation safe.
+const cache = new Map();
+const queues = new Map();
+const digest = value => createHash('sha256').update(value).digest('hex');
+const empty = () => ({v:2,connection:null,mcp:{},skills:{},accountConnectors:{}});
+const optional = async file => readFile(file,'utf8').catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+const stamp = async file => Promise.all([file,file+'.journal'].map(async p=>{try {const s=await stat(p);return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;}catch(e){if(e.code==='ENOENT')return '';throw e;}})).then(x=>x.join('|'));
+const serial = (file,work) => {const task=(queues.get(file)??Promise.resolve()).then(work);queues.set(file,task.catch(()=>{}));return task;};
+async function atomic(file,body) {
+  await mkdir(dirname(file),{recursive:true,mode:0o700});
+  const temp=file+'.'+randomUUID()+'.tmp';
   try {
-    value = await readFile(file, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return {
-        status: "missing",
-        state: {
-          v: 2,
-          connection: null,
-          mcp: {},
-          skills: {},
-          accountConnectors: {},
-        },
-      };
-    throw Object.assign(
-      Error("管理记录暂时无法读取；已暂停同步，请检查文件权限后重新读取。"),
-      { code: "state-unreadable" },
-    );
-  }
-  try {
-    return { status: "ready", state: validateState(JSON.parse(value)) };
-  } catch (error) {
-    throw Object.assign(
-      Error(
-        error.code === "state-version"
-          ? error.message
-          : "管理记录已损坏；原文件已保留，请恢复备份后重新读取。",
-      ),
-      { code: error.code ?? "state-corrupt" },
-    );
+    const h=await open(temp,'wx',0o600);
+    try {await h.writeFile(body);await h.sync();}finally{await h.close();}
+    await rename(temp,file);
+    const dir=await open(dirname(file),'r');try{await dir.sync();}finally{await dir.close();}
+  }finally{await unlink(temp).catch(()=>{});}
+}
+function delta(before,after,path=[],out=[]) {
+  if(before===after)return out;
+  if(object(before)&&object(after)) {
+    for(const k of new Set([...Object.keys(before),...Object.keys(after)])) {
+      if(!Object.hasOwn(after,k))out.push({path:[...path,k],remove:true});
+      else if(!Object.hasOwn(before,k))out.push({path:[...path,k],value:after[k]});
+      else delta(before[k],after[k],[...path,k],out);
+    }
+  }else if(!Array.isArray(before)||!Array.isArray(after)||JSON.stringify(before)!==JSON.stringify(after))out.push({path,value:after});
+  return out;
+}
+function apply(state,changes) {
+  for(const c of changes) {
+    if(!Array.isArray(c.path)||!c.path.length||c.path.some(k=>typeof k!=='string'||['__proto__','constructor','prototype'].includes(k)))throw Error('增量记录路径无效');
+    let parent=state;
+    for(const k of c.path.slice(0,-1)){if(!Object.hasOwn(parent,k)||!object(parent[k]))throw Error('增量记录顺序无效');parent=parent[k];}
+    if(c.remove)delete parent[c.path.at(-1)];else parent[c.path.at(-1)]=c.value;
   }
 }
-
-// Backups contain ownership facts and original policies; keep them private.
-export async function saveManagedState(file, state) {
-  validateState(state);
-  const {writeFile,rename,mkdir,readdir,unlink}=await import('node:fs/promises');
-  const {dirname,join}=await import('node:path');
-  const {createHash,randomUUID}=await import('node:crypto');
-  const dir=join(dirname(file),'state-backups');
-  await mkdir(dir,{recursive:true,mode:0o700});
-  const previous=await readFile(file,'utf8').catch(e=>{if(e.code==='ENOENT')return null;throw e;});
-  if(previous!==null && previous === JSON.stringify(state,null,2)+'\n') return;
-  if(previous!==null) {
-    // Never replace a corrupt original or promote it into a valid backup.
-    validateState(JSON.parse(previous));
-    const id=createHash('sha256').update(previous).digest('hex');
-    await writeFile(join(dir,`${id}.json`),previous,{flag:'wx',mode:0o600}).catch(e=>{if(e.code!=='EEXIST')throw e;});
+export async function readManagedState(file) {
+  // Retry when a concurrent writer rotates the snapshot while a page reads it.
+  for(let attempt=0;attempt<5;attempt++) {
+    const before=await stamp(file);
+    const [body,journalBody]=await Promise.all([optional(file),optional(file+'.journal')]);
+    const journal=journalBody??'';
+    if(before!==await stamp(file))continue;
+    try {
+      const state=body!==null?validateState(JSON.parse(body)):empty();
+      let seq=state._journalSeq??0;
+      const lines=journal.split('\n'); const tail=lines.pop();
+      let count=0;
+      for(const line of lines) {
+        if(!line)throw Error('增量记录损坏');
+        const {payload,checksum}=JSON.parse(line);
+        if(typeof payload!=='string'||digest(payload)!==checksum)throw Error('增量记录校验失败');
+        const row=JSON.parse(payload);
+        if(!Number.isSafeInteger(row.seq)||row.seq<1||!Array.isArray(row.changes))throw Error('增量记录无效');
+        if(row.seq<=seq)continue;
+        if(row.seq!==seq+1)throw Error('增量记录不连续');
+        apply(state,row.changes);seq=row.seq;count++;
+      }
+      state._journalSeq=seq;validateState(state);
+      cache.set(file,{state:structuredClone(state),stamp:before,count,bytes:Buffer.byteLength(journal)-Buffer.byteLength(tail),tail:!!tail});
+      return {status:body!==null?'ready':'missing',state};
+    } catch(error) {
+      throw Object.assign(Error(error.code==='state-version'?error.message:'管理记录已损坏；原文件已保留，请恢复备份后重新读取。'),{code:error.code??'state-corrupt'});
+    }
   }
-  const temp=`${file}.${randomUUID()}.tmp`;
-  try {await writeFile(temp,JSON.stringify(state,null,2)+'\n',{mode:0o600});await rename(temp,file);} finally {await unlink(temp).catch(()=>{});}
-  const entries=await Promise.all((await readdir(dir)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(async n=>({n,time:(await (await import('node:fs/promises')).stat(join(dir,n))).mtimeMs})));
-  entries.sort((a,b)=>b.time-a.time);
-  await Promise.all(entries.slice(5).map(x=>unlink(join(dir,x.n))));
+  throw Object.assign(Error('管理记录正在更新，请稍后重试。'),{code:'state-unreadable'});
+}
+async function current(file) {
+  let entry=cache.get(file);
+  if(!entry||entry.stamp!==await stamp(file)){await readManagedState(file);entry=cache.get(file);}
+  return entry;
+}
+async function compact(file,state,keepBackup=true) {
+  const body=JSON.stringify(state,null,2)+'\n';
+  const previous=await optional(file);
+  if(previous&&keepBackup&&previous!==body) {
+    validateState(JSON.parse(previous));
+    const dir=join(dirname(file),'state-backups');await mkdir(dir,{recursive:true,mode:0o700});
+    await atomic(join(dir,digest(previous)+'.json'),previous);
+    const entries=await Promise.all((await readdir(dir)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(async n=>({n,time:(await stat(join(dir,n))).mtimeMs})));
+    entries.sort((a,b)=>b.time-a.time);
+    for(const item of entries.slice(5))await unlink(join(dir,item.n));
+  }
+  await atomic(file,body);
+  await atomic(file+'.journal','');
+  cache.set(file,{state:structuredClone(state),stamp:await stamp(file),count:0,bytes:0,tail:false});
+}
+export function saveManagedState(file,state) {
+  const next=JSON.parse(JSON.stringify(state));validateState(next);
+  return serial(file,async()=>{
+    const entry=await current(file);
+    next._journalSeq=entry.state._journalSeq??0;
+    const changes=delta(entry.state,next);
+    if(!changes.length)return;
+    await mkdir(dirname(file),{recursive:true,mode:0o700});
+    if(!await optional(file))await compact(file,entry.state,false);
+    const payload=JSON.stringify({seq:next._journalSeq+1,changes});
+    const line=JSON.stringify({payload,checksum:digest(payload)})+'\n';
+    const h=await open(file+'.journal','a+',0o600);
+    try {if(entry.tail)await h.truncate(entry.bytes);await h.writeFile(line);await h.sync();}finally{await h.close();}
+    next._journalSeq++;
+    const updated={state:next,stamp:await stamp(file),count:entry.count+1,bytes:entry.bytes+Buffer.byteLength(line),tail:false};
+    cache.set(file,updated);
+    if(updated.count>=128||updated.bytes>=1024*1024)await compact(file,next);
+  });
+}
+export function createStateBackup(file) {
+  return serial(file,async()=>{
+    const entry=await current(file);
+    const body=JSON.stringify(entry.state,null,2)+'\n';validateState(entry.state);
+    const dir=join(dirname(file),'state-backups');await mkdir(dir,{recursive:true,mode:0o700});
+    const id=digest(body);await atomic(join(dir,id+'.json'),body);
+    const entries=await Promise.all((await readdir(dir)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(async n=>({n,time:(await stat(join(dir,n))).mtimeMs})));
+    entries.sort((a,b)=>b.time-a.time);for(const item of entries.slice(5))await unlink(join(dir,item.n));
+    return {id};
+  });
+}
+export function compactManagedState(file,{keepBackup=true}={}) {
+  return serial(file,async()=>{const entry=await current(file);if(entry.bytes||entry.tail)await compact(file,entry.state,keepBackup);});
 }
 const counts = s => Object.fromEntries(['mcp','skills','accountConnectors'].map(k=>[k,Object.keys(s[k]??{}).length]));
 export async function stateBackups(file) {
@@ -194,8 +263,12 @@ export async function restoreStateBackup(file,id,checksum) {
   const {randomUUID}=await import('node:crypto');
   // Preserve the original even when corrupt, independently of valid backups.
   await copyFile(file,`${file}.before-restore`).catch(e=>{if(e.code!=='ENOENT')throw e;});
-  const temp=`${file}.${randomUUID()}.tmp`;
-  try {await writeFile(temp,JSON.stringify(preview.state,null,2)+'\n',{mode:0o600});await rename(temp,file);} finally {await unlink(temp).catch(()=>{});}
+  await copyFile(file+'.journal',file+'.journal.before-restore').catch(e=>{if(e.code!=='ENOENT')throw e;});
+  // Advance past the old journal before installing a restored snapshot. A crash
+  // before journal rotation must never replay the state being rolled back.
+  let max=preview.state._journalSeq??0;
+  for(const line of (await optional(file+'.journal')??'').split('\n'))try{const row=JSON.parse(JSON.parse(line).payload);if(Number.isSafeInteger(row.seq))max=Math.max(max,row.seq);}catch{}
+  await compact(file,{...preview.state,_journalSeq:max+1},false);
 }
 
 export async function deleteStateBackup(file, id, checksum) {

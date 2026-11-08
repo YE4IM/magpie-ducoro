@@ -1,3 +1,6 @@
+import { maintainLocalRecords } from "./local-records.mjs"
+import { createSkillArtifacts } from "./skill-artifacts.mjs"
+import { createOperationStore } from "./operation-store.mjs"
 import { readCachedFile, clearFileCache, fileMetrics } from "./file-cache.mjs"
 import "./ui/plans.js"
 import { createReadCoordinator, createProgress } from "./performance.mjs"
@@ -27,16 +30,14 @@ import { createReadCoordinator, createProgress } from "./performance.mjs"
 // This file must export exactly one plugin function (plus _internal helpers).
 
 import { createPageService } from "./page-service.mjs"
-import { readManagedState, saveManagedState } from "./state-store.mjs"
+import { readManagedState, saveManagedState, compactManagedState } from "./state-store.mjs"
 import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
 import { syncAccountConnectors } from "./account-connectors.mjs"
 import { createCommandRunner } from "./command-runner.mjs"
 import { watch as fsWatch } from "node:fs"
 import {
   chmod,
-  copyFile,
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   realpath,
@@ -46,7 +47,7 @@ import {
   writeFile,
 } from "node:fs/promises"
 import { createHash } from "node:crypto"
-import { homedir, tmpdir } from "node:os"
+import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -321,9 +322,9 @@ const createEngine = (input = {}, options = {}) => {
 
   const loadState = async () => {
     if (stateLoaded) return
-    stateLoaded = true
     const loaded = await readManagedState(stateFile)
     state = loaded.state
+    stateLoaded = true
   }
 
   let stateSaveQueue = Promise.resolve()
@@ -341,6 +342,8 @@ const createEngine = (input = {}, options = {}) => {
     stateSaveQueue = task.catch(() => {})
     return task
   }
+
+  const operations = createOperationStore({ getState: () => state, save: saveState })
 
   // --------------------------------------------------------------- cli
 
@@ -430,7 +433,7 @@ const createEngine = (input = {}, options = {}) => {
     await reportCapabilities(plan, true)
   }
 
-  const modelSync = createModelSync({
+  const modelSync = createModelSync({ operations,
     opts: { ...opts, dryRun }, run, getState: () => state, save: saveState,
     requestRetry: (...args) => requestRetry(...args), log,
     isCurrent: () => !stopped && !activeGatewayController?.signal.aborted,
@@ -853,7 +856,10 @@ const createEngine = (input = {}, options = {}) => {
       const hash = defHash(def)
       const mine = state.mcp[id]
       const changed = !layer.has(slug) || mine?.hash !== hash
+      const operation = await operations.begin('mcp',scope,slug,hash,['revoke-mcp'])
+      if (!operation) continue
       if (changed && !(await materializeSecrets(def))) {
+        await operations.finish(operation,false)
         log(`mcp ${slug} (${scope}) skipped: could not store its credential`)
         requestRetry("mcp-sync")
         continue
@@ -862,13 +868,17 @@ const createEngine = (input = {}, options = {}) => {
         const r = layer.has(slug) ? await updateMcpServer(scope, slug, def) : await addMcpServer(scope, def)
         if (r.ok) {
           state.mcp[id] = { scope, slug, hash, sourceName: source.name }
+          await operations.finish(operation)
           await saveState()
           pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
         } else {
+          await operations.finish(operation,false)
           log(`saving MCP server ${slug} (${scope}) failed (kept for retry): ${errMsg(r)}`)
           requestRetry("mcp-sync")
         }
-      } else if (forceMcpProbe || layer.get(slug)?.connectionStatus !== "connected") {
+      } else {
+        await operations.finish(operation)
+        if (forceMcpProbe || layer.get(slug)?.connectionStatus !== "connected")
         pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
       }
     }
@@ -916,6 +926,8 @@ const createEngine = (input = {}, options = {}) => {
     }
     return { files, md, hash: hash.digest("hex") }
   }
+
+  const artifacts = createSkillArtifacts(join(stateDir, "skill-artifacts"), readBundle)
 
   const skillCommand = (scope, action, ...args) => scope === "global"
     ? ["skill", action, ...args]
@@ -1081,7 +1093,7 @@ const createEngine = (input = {}, options = {}) => {
         if (watching && pending) return
         if (!sourceNames.has(bundle.sourceName)) continue
         if (!bundle.dir) continue
-        const { dir, hash, files, sourceName, md } = bundle
+        const { dir, hash, sourceName } = bundle
         const id = `${scope}:${name}`
         let mine = state.skills[id]
         if (mine?.replacement) continue
@@ -1090,22 +1102,11 @@ const createEngine = (input = {}, options = {}) => {
           requestRetry("skill-conflict")
           continue
         }
-        if (mine?.hash === hash && existing.has(name)) continue
-        const temp = await mkdtemp(join(tmpdir(), "magpie-ducoro-skill-"))
+        if (mine?.hash === hash && existing.has(name)) { const op=await operations.begin('skills',scope,name,hash,['revoke-skills']); await operations.finish(op); continue }
+        const operation = await operations.begin('skills', scope, name, hash, ['revoke-skills'])
+        if (!operation) continue
         try {
-          const staged = join(temp, name)
-          await mkdir(staged)
-          for (const f of files) {
-            const path = join(staged, f.name)
-            await mkdir(dirname(path), { recursive: true })
-            if (f.name === "SKILL.md") await writeFile(path, md)
-            else await copyFile(f.path, path)
-            await chmod(path, f.mode)
-          }
-          if ((await readBundle(staged)).hash !== hash) {
-            invalidateSkillCache()
-            throw new Error(`skill ${name} changed during staging; will retry`)
-          }
+          const staged = await artifacts.prepare(name, bundle)
           if (mine && existing.has(name)) {
             let suffix = 0
             let backupName
@@ -1116,6 +1117,7 @@ const createEngine = (input = {}, options = {}) => {
             if (!backup.ok) {
               log(`backing up skill ${name} failed; update deferred: ${errMsg(backup)}`)
               requestRetry("skill-backup")
+              await operations.finish(operation, false)
               continue
             }
             existing.delete(name)
@@ -1135,18 +1137,19 @@ const createEngine = (input = {}, options = {}) => {
             for (const [oldId, old] of Object.entries(state.skills)) {
               if (oldId !== id && old.scope === scope && old.sourceName === sourceName) await removeSkill(oldId, old)
             }
+            await operations.finish(operation, !mine.replacement)
             log(`skill ${name} imported (${scope})`)
           } else {
             log(`importing skill ${name} failed; restoring previous version: ${errMsg(r)}`)
+            await operations.finish(operation, false)
             requestRetry("skill-import")
             if (mine?.replacement) await recoverSkillReplacement(id, mine, existing)
           }
         } catch (e) {
           invalidateSkillCache()
           log(`preparing skill ${name} failed; existing import retained: ${e.message}`)
+          await operations.finish(operation, false)
           requestRetry("skill-stage")
-        } finally {
-          await rm(temp, { recursive: true, force: true })
         }
       }
     }
@@ -1220,7 +1223,7 @@ const createEngine = (input = {}, options = {}) => {
     }
   }
 
-  const syncTotal = createTotalSync({ opts: { ...opts, dryRun }, paths, run, save: saveState, getState: () => state, requestRetry: (...args) => requestRetry(...args), log })
+  const syncTotal = createTotalSync({ operations, opts: { ...opts, dryRun }, paths, run, save: saveState, getState: () => state, requestRetry: (...args) => requestRetry(...args), log })
 
   let resourcePlan = null
   const resolveResourcePlan = async () => {
@@ -1321,7 +1324,7 @@ const createEngine = (input = {}, options = {}) => {
       }
     }
     try {
-      if (wants("accounts")) await progress.step("accounts", () => syncAccountConnectors({ options: opts, state, run, save: saveState }))
+      if (wants("accounts")) await progress.step("accounts", () => syncAccountConnectors({ options: opts, state, run, save: saveState, operations }))
     } catch (error) {
       log("account connector synchronization pending:", error.message)
       diagnostics.retry("account-connectors", ["mcp"])
@@ -1364,12 +1367,15 @@ const createEngine = (input = {}, options = {}) => {
       }
       const changes = dirtyFeatures; dirtyFeatures = new Set()
       const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
-      roundFeatures = ['file-change','coalesced','page-retry-failed'].includes(reason) && changes.size && !changes.has('all') ? changes : null
+      roundFeatures = (reason.startsWith('retry:') || ['file-change','coalesced','page-retry-failed'].includes(reason)) && changes.size && !changes.has('all') ? changes : null
       roundSkillPaths = roundFeatures && skillPaths.size ? skillPaths : null
+      retryRequested = false
+      artifacts.reset()
+      operations.reset(reason.startsWith('retry:') || reason === 'page-retry-failed')
       stateLoaded = false
       state = { v: 2, connection: null, mcp: {}, skills: {} }
-      progress.begin(reason, { ...run.metrics(), ...fileMetrics })
-      diagnostics.begin(reason)
+      progress.begin(reason, { ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
+      diagnostics.begin(reason, roundFeatures)
       if (!roundFeatures) { totalForRound = null; capabilitiesForRound = null }
       try {
         await syncAllUnlocked(reason)
@@ -1382,11 +1388,12 @@ const createEngine = (input = {}, options = {}) => {
         for (const feature of roundFeatures ?? ['all']) dirtyFeatures.add(feature)
         for (const path of roundSkillPaths ?? []) dirtySkillPaths.add(path)
       }
+      if (!dryRun && stateLoaded) { if (!roundFeatures && !pending && !retryRequested) await operations.retire(null); await maintainLocalRecords(stateDir,state,saveState); await compactManagedState(stateFile) }
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
       if (locked) await rm(lock, { recursive: true, force: true })
-      progress.end({ ...run.metrics(), ...fileMetrics })
+      progress.end({ ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
       syncing = false
       // Probing remote servers must not hold the mutation lock or delay a
       // subsequent Library event. Manual syncs still wait for their diagnostics.
@@ -1433,8 +1440,10 @@ const createEngine = (input = {}, options = {}) => {
     // Total's per-resource report provides finer attribution than its shared
     // retry signal; use that report rather than marking both resources failed.
     if (reason !== "total-resource") diagnostics.retry(reason)
-    if (!watching) return
+    const feature = reason.startsWith('skill') ? 'skills' : reason.startsWith('mcp') ? 'mcp' : reason.startsWith('total') ? 'total' : reason.startsWith('account') ? 'accounts' : /model|connection|gateway/.test(reason) ? 'gateway' : 'all'
+    dirtyFeatures.add(feature)
     retryRequested = true
+    if (!watching) return
     if (retryTimer) return
     retryTimer = setTimeout(() => {
       retryTimer = null
@@ -1453,7 +1462,7 @@ const createEngine = (input = {}, options = {}) => {
       for(const [key,value] of Object.entries(report.features ?? {})) if(value.status==='pending') dirtyFeatures.add(map[key] ?? 'all')
       if(report.issues?.some(issue => issue.code?.includes('account')))dirtyFeatures.add('accounts')
       if(!dirtyFeatures.size)return
-    } else if (!["file-change","coalesced"].includes(reason)) dirtyFeatures.add("all")
+    } else if (!reason.startsWith("retry:") && !["file-change","coalesced"].includes(reason)) dirtyFeatures.add("all")
     if (reason === "file-change" || reason === "watch-fallback") interruptGatewayReads()
     if (running) { pending = true; return }
     if (syncTimer) return

@@ -11,6 +11,13 @@ const defaults = { botPlansCatalog:{},botPlans:{},botInstructions:{},pausedModel
 const maps = new Set(['botPlansCatalog','botPlans','botInstructions','modelGuards','botModels','resourceAssignments','accountConnectors','accountResolutions','modelCapabilityRefs']);
 export const stable = value => JSON.stringify(value, (_, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x);
 export const revision = value => createHash('sha256').update(stable(value) ?? 'undefined').digest('hex');
+export function validateCheckpoint(value) {
+  if (!value || value.version !== 1 || typeof value.id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.id)
+    || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))
+    || validateOptions(value.before).length || validateOptions(value.after).length) throw Error('检查点文件格式无效。');
+  const before=projectOptions(value.before),after=projectOptions(value.after);
+  return {version:1,id:value.id,createdAt:new Date(value.createdAt).toISOString(),before,after,snapshot:value.snapshot===true,changes:optionChanges(before,after)};
+}
 export const projectOptions = options => Object.fromEntries(Object.entries(defaults).map(([k,v])=>[k,structuredClone(options[k] ?? v)]));
 export function optionChanges(before, after) {
   const rows = [];
@@ -24,30 +31,31 @@ export function optionChanges(before, after) {
   }
   return rows;
 }
-export async function createCheckpoint(stateDir, before, after) {
+export async function createCheckpoint(stateDir, before, after, snapshot=false) {
   if(validateOptions(before).length || validateOptions(after).length)throw Error('Invalid checkpoint settings');
   const checkpoint={version:1,id:randomUUID(),createdAt:new Date().toISOString(),before:projectOptions(before),after:projectOptions(after)};
+  checkpoint.snapshot=snapshot;
   checkpoint.changes=optionChanges(checkpoint.before,checkpoint.after);
-  if(!checkpoint.changes.length)return null;
+  if(!snapshot&&!checkpoint.changes.length)return null;
   const dir=join(stateDir,'configuration-checkpoints');await mkdir(dir,{recursive:true,mode:0o700});
   const file=join(dir,checkpoint.id+'.json'),temp=file+'.tmp';
   try {await writeFile(temp,JSON.stringify(checkpoint),{mode:0o600,flag:'wx'});await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}
   const records=await checkpoints(stateDir);for(const old of records.slice(20))await unlink(join(dir,old.id+'.json')).catch(()=>{});
   return {id:checkpoint.id,createdAt:checkpoint.createdAt,changes:checkpoint.changes};
 }
-export async function checkpoints(stateDir) {
+export async function checkpoints(stateDir, current) {
   const dir=join(stateDir,'configuration-checkpoints');const result=[];
   for(const file of await readdir(dir).catch(e=>{if(e.code==='ENOENT')return [];throw e;})) {
     if(!/^[a-f0-9-]{36}\.json$/.test(file))continue;
-    try {const c=JSON.parse(await readFile(join(dir,file),'utf8'));if(c.version!==1 || file!==c.id+'.json' || validateOptions(c.before).length || validateOptions(c.after).length)continue;result.push({id:c.id,createdAt:c.createdAt,changes:optionChanges(c.before,c.after)});}catch{}
+    try {const c=validateCheckpoint(JSON.parse(await readFile(join(dir,file),'utf8')));if(file!==c.id+'.json')continue;result.push({id:c.id,createdAt:c.createdAt,changes:c.snapshot&&current?optionChanges(c.before,projectOptions(current)):c.changes});}catch{}
   }
   return result.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
 export async function rollbackDraft(stateDir,id,selections,current) {
   if(!/^[a-f0-9-]{36}$/.test(id) || !Array.isArray(selections) || !selections.length)throw Error('Invalid checkpoint selection');
-  const c=JSON.parse(await readFile(join(stateDir,'configuration-checkpoints',id+'.json'),'utf8'));
-  if(c.version!==1 || c.id!==id || validateOptions(c.before).length || validateOptions(c.after).length)throw Error('Invalid checkpoint');
-  const rows=optionChanges(c.before,c.after), draft=structuredClone(current), normalized=projectOptions(current);
+  const c=validateCheckpoint(JSON.parse(await readFile(join(stateDir,'configuration-checkpoints',id+'.json'),'utf8')));
+  if(c.id!==id)throw Error('Invalid checkpoint');
+  const rows=optionChanges(c.before,c.snapshot?projectOptions(current):c.after), draft=structuredClone(current), normalized=projectOptions(current);
   for(const index of new Set(selections)) {
     if(!Number.isInteger(index)||!rows[index])throw Error('Invalid checkpoint selection');
     const row=rows[index],actual=maps.has(row.key)?normalized[row.key]?.[row.target]:normalized[row.key];

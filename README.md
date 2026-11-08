@@ -1,14 +1,37 @@
-# Ducoro 0.4.2
+# Ducoro 0.4.3
+
+## Import and clear local backups
+
+Both **Valid backups and restore preview** and **Configuration checkpoints and selective restore** in Sync diagnostics now provide **Import external file** and **Clear local backups**.
+
+State imports accept complete v1/v2 state snapshots, including existing backup JSON files. A journal alone is not a complete snapshot. Checkpoint imports accept version 1 records containing `id`, `createdAt`, `before` and `after`; changes are recalculated and a new local identity prevents overwriting an existing checkpoint. Files are limited to 8 MiB.
+
+Review and confirm the import to add a backup to its local list. Apply it separately through state restore preview or selected checkpoint entries staged into a draft. Importing does not apply settings or modify Bots.
+
+Each clear action previews the number and size of files in that collection and asks for confirmation. It retains current state, journals, recovery originals, skill caches and the other backup collection. A changed file list requires a new preview. Action rows now keep consistent spacing and wrap on narrow screens in both languages.
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro. Manage assignments for individual Bots from the plugin page.
 
 ## Installation
 
-Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.2.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
+Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.3.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
 Replace the previous plugin path or package when upgrading. Keep existing management records and assignments; do not enable two versions simultaneously.
 
-## What's new
+## What's new in 0.4.3
+
+- **Shared skill artifacts:** prepare and validate each skill name/content version once, then reuse it for authorized Bots. Each target retains its own permission checks, import and replacement recovery.
+- **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records, at 1 MiB, or at the end of a sync round. Keep up to five state backups.
+- **Operation-level retries:** record each target's desired revision, dependencies, status and attempt count. Automatic retries schedule affected features and skip completed operations at the same revision. Failed or interrupted operations reconcile actual state before recovery. Full manual and periodic syncs still check external changes.
+- **Local record cleanup:** open **Sync diagnostics → Local record management → Clean up local records**. Review the counts and storage estimate, then confirm. Cleanup removes completed operation history, old state backups and unused skill caches, and compacts incremental records. It retains current ownership, permission recovery data, unfinished operations and skill versions in use. Sync and cleanup share a lock; an outdated preview must be refreshed.
+- **Bounded retention:** retain up to 500 completed operation records and reclaim unused skill caches older than seven days after sync. Configuration checkpoints retain their existing 20-item limit and are not deleted by this cleanup action.
+- **English and Chinese:** cleanup previews, confirmations, results and errors follow the host language. Switching languages preserves open dialogs and preview values. Bot names, resource names and technical identifiers are unchanged.
+
+Stop the old plugin host before loading 0.4.3; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, let 0.4.3 finish synchronization and snapshot compaction, then stop its host. After an interrupted run, recover with 0.4.3 first. Do not manually delete an uncompacted journal.
+
+An isolated 100-Bot storage benchmark reduced logical writes from 83,688,798 to 859,120 bytes (about 98.97%). Durable journal flushing increased the storage-only time from 260 to 643 ms. These figures do not establish end-to-end sync speed.
+
+## Features introduced in 0.4.2
 
 - Read configuration back after saving. Results distinguish verified, failed, unverified and skipped items. Rechecking is read-only and does not replay timed-out writes. Models and account policies support read-back; resource contents, skills, instructions and subagents remain unverified where evidence is incomplete.
 - Search Bots by name or ID, filter their status and see unsaved changes. Copy model, library connector and skill assignments to selected Bots after reviewing the affected targets. Copies change the draft; preview and save to apply. Account permissions are excluded.

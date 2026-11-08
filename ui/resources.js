@@ -584,7 +584,7 @@
         render(); notify(); dialog.close();
       };
       cancel.onclick = () => dialog.close();
-      dialog.append(notice, preview, apply, cancel); dialog.addEventListener("close", () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
+      dialog.append(notice, DucoroBackupFiles.actions(preview,apply,cancel)); dialog.addEventListener("close", () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
     });
     function render() {
       if (

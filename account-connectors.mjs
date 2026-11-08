@@ -10,7 +10,7 @@ import {
   accountOrder,
 } from "./account-plan.mjs";
 
-export async function syncAccountConnectors({ options, state, run, save }) {
+export async function syncAccountConnectors({ options, state, run, save, operations }) {
   const desired = options.syncMcp ? (options.accountConnectors ?? {}) : {};
   const owned = (state.accountConnectors ??= {});
   const ids = [...new Set([...Object.keys(desired), ...Object.keys(owned)])];
@@ -49,6 +49,8 @@ export async function syncAccountConnectors({ options, state, run, save }) {
         for (const slug of accountOrder(desired[id], history).filter((slug) =>
           revoking ? !desired[id]?.[slug] : !!desired[id]?.[slug],
         )) {
+          const operation = operations ? await operations.begin('accounts',id,slug,{want:desired[id]?.[slug]??null,resolution:options.accountResolutions?.[id]?.[slug]},['account-catalog']) : true;
+          if (!operation) continue;
           try {
             const want = desired[id]?.[slug] ?? null;
             const record = history[slug];
@@ -129,7 +131,9 @@ export async function syncAccountConnectors({ options, state, run, save }) {
               };
             else delete history[slug];
             await save();
+            await operations?.finish(operation);
           } catch (error) {
+            await operations?.finish(operation,false);
             failures.push({ botId: id, slug, reason: error.message });
           }
         }

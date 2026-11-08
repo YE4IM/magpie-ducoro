@@ -1,6 +1,6 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Sync Magpie models, connectors, skills and instructions with Ducoro.",
   "type": "module",
   "main": "./bridge.mjs",
@@ -102,7 +102,11 @@
     "content-preview.mjs",
     "performance.mjs",
     "file-cache.mjs",
-    "control-center.mjs"
+    "control-center.mjs",
+    "skill-artifacts.mjs",
+    "operation-store.mjs",
+    "local-records.mjs",
+    "backup-files.mjs"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs"

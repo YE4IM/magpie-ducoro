@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 // Bounded work and in-flight reads; writes are never cached or replayed.
 export async function mapLimit(items, limit, work, { signal } = {}) {
-  const results = new Array(items.length); let next = 0;
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError('Concurrency limit must be a positive integer');
+  const results = new Array(items.length); let next = 0, failed = false, failure;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (!signal?.aborted) { const index = next++; if (index >= items.length) break; results[index] = await work(items[index], index); }
+    while (!failed && !signal?.aborted) {
+      const index = next++; if (index >= items.length) break;
+      try { results[index] = await work(items[index], index); }
+      catch (error) { if (!failed) { failed = true; failure = error; } }
+    }
   }));
+  // Keep the caller's mutation lock until every already-started worker settles.
+  if (failed) throw failure;
   return results;
 }
 export function createReadCoordinator(run) {

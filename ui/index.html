@@ -13,13 +13,14 @@
   <script src="preview.js" defer></script>
   <script src="resources.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="backup-files.js" defer></script>
   <script src="reliability.js" defer></script>
   <script src="control-center.js" defer></script>
 </head>
 <body>
   <main class="console">
     <header class="hero">
-      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.2</span></h1></div></div>
+      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.3</span></h1></div></div>
       <p>在一处管理连接、同步范围和每个 Bot 的资源。</p>
       <div class="connection-note"><span class="dot" aria-hidden="true"></span><span id="connection-state">正在读取插件配置…</span></div>
     </header>
@@ -27,6 +28,7 @@
       <button type="button" class="tab active" data-tab="settings" aria-pressed="true">同步设置</button>
       <button type="button" class="tab" data-tab="resources" aria-pressed="false">Bot 资源</button>
       <button type="button" class="tab" data-tab="diagnostics" aria-pressed="false">同步诊断</button>
+      <button type="button" class="tab" data-tab="backups" aria-pressed="false">备份管理</button>
     </nav>
     <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
     <section id="settings" class="tab-content">
@@ -80,9 +82,8 @@
     <section id="diagnostics" class="tab-content" hidden>
       <div class="section-title"><div><h2>同步结果，一目了然</h2><p>每次查看生成当前报告，或重试同步后再次查看。</p></div><span class="pill">实时诊断</span></div>
       <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>报告按需生成，仅在当前页面显示，不保存文件或累积历史。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
-      <section class="card"><h2>管理记录恢复</h2><p>若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。</p><button type="button" id="retry-state" class="secondary">重新读取管理记录</button><p id="state-message" role="status"></p></section>
+      <section class="card"><h2>管理记录状态与重读</h2><p>若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。</p><button type="button" id="retry-state" class="secondary">重新读取管理记录</button><p id="state-message" role="status"></p></section>
       <section class="card"><div class="card-heading"><h2>逐项结果核验</h2><button type="button" id="verify-results" class="secondary">重新读取并核验</button></div><p>配置核验成功不代表运行中的会话已加载。超时后先读取核验，再决定是否重试。</p><div id="verification-results" role="status">尚未核验</div></section>
-      <section class="card"><h2>有效备份与恢复预览</h2><p>恢复管理记录前请核对备份内容。恢复不会直接写入 Bot，恢复完成后再手动同步。</p><button type="button" id="list-backups" class="secondary">查看有效备份</button><div id="backup-results" role="status"></div></section>
       <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
       <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步诊断或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
       <section id="report-view" hidden>
@@ -91,6 +92,12 @@
         <section class="card"><h2>需要关注</h2><div id="report-issues"></div></section>
         <p class="footnote">报告说明配置层的同步情况。除非报告明确验证，否则不代表运行中的会话已加载新的工具、技能或子代理。</p>
       </section>
+    </section>
+    <section id="backups" class="tab-content" hidden>
+      <div class="section-title"><h2>备份管理</h2></div>
+      <section class="card"><h2>有效备份与恢复预览</h2><p>恢复管理记录前请核对备份内容。恢复不会直接写入 Bot，恢复完成后再手动同步。</p><div id="state-backup-actions" class="button-group action-row"><button type="button" id="list-backups" class="secondary">查看有效备份</button></div><p id="state-backup-message" role="status"></p><div id="backup-results" role="status"></div></section>
+<div id="checkpoint-section"></div>
+      <section class="card"><h2>本地存储维护</h2><p>清理已完成的操作历史、历史备份和未使用的技能缓存，合并增量记录。保留当前配置、未完成任务和正在使用的技能。</p><button type="button" id="clean-local-records" class="secondary">清理本地记录</button><div id="local-records-results" role="status"></div></section>
     </section>
     <footer id="save-bar" class="save-bar"><span id="dirty-state">正在加载…</span><div><button type="button" id="reload" class="secondary" disabled>重新读取</button><button type="button" id="preview" class="secondary" disabled>预览变化</button><button type="button" id="save" class="primary" disabled>保存设置</button></div></footer>
   </main>

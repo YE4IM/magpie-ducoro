@@ -81,6 +81,7 @@ function safeFeature(value = {}) {
   if (SKIP_REASONS.has(value.skipReason)) safe.skipReason = value.skipReason
   if (['passed', 'failed'].includes(value.probeStatus)) safe.probeStatus = value.probeStatus
   if (count(value.count) !== undefined) safe.count = value.count
+  if (timestamp(value.checkedAt)) safe.checkedAt = timestamp(value.checkedAt)
   return safe
 }
 
@@ -108,7 +109,7 @@ function summarize(report) {
 }
 
 export function buildDiagnostics({ options = {}, reason, stages = {}, retries = [], state = {}, total, capabilities, startedAt, roundId, now = new Date() } = {}) {
-  const report = { schemaVersion: 1, pluginVersion: '0.4.2', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.4.3', updatedAt: new Date(now).toISOString(), reason: safeReason(reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(roundId)) report.roundId = roundId
   for (const feature of FEATURES) {
     report.features[feature] = safeFeature(stages[feature])
@@ -174,7 +175,7 @@ function safeReason(reason) {
 // never become part of a support export or the CLI's output.
 export function sanitizeDiagnostics(input) {
   if (!object(input) || input.schemaVersion !== 1 || !object(input.features) || !timestamp(input.updatedAt)) return null
-  const report = { schemaVersion: 1, pluginVersion: '0.4.2', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
+  const report = { schemaVersion: 1, pluginVersion: '0.4.3', updatedAt: timestamp(input.updatedAt), reason: safeReason(input.reason), status: 'unknown', runtimeLoaded: 'unknown', features: {}, issues: [], targets: [] }
   if (validRoundId(input.roundId)) report.roundId = input.roundId
   for (const feature of FEATURES) report.features[feature] = safeFeature(input.features[feature])
   for (const feature of FEATURES) {
@@ -235,8 +236,34 @@ export async function readDiagnostics({ stateDir = defaultStateDir(), port = 348
 
 export function createDiagnostics({ options = {}, now = () => new Date() } = {}) {
   let round = null, completed = null
+  const featureGroups = { gateway: ['connection', 'models'], mcp: ['mcp'], accounts: ['mcp'], skills: ['skills'], total: ['instructions', 'subagents'] }
+  const completedReport = date => {
+    const report = buildDiagnostics({ ...(completed ?? { options }), now: date })
+    if (!completed) return report
+    for (const feature of FEATURES) {
+      const row = report.features[feature]
+      // Carry bounded, public facts only. A new error affecting this feature
+      // takes precedence, including state/library failures in a partial round.
+      if (completed.carried?.[feature] && row.status !== 'pending' && row.status !== 'disabled' && !completed.stages[feature]) report.features[feature] = structuredClone(completed.carried[feature])
+      else row.checkedAt = completed.completedAt
+    }
+    if (completed.probeStatus) {
+      report.features.mcp.probeStatus = completed.probeStatus
+      if (completed.probeStatus === 'failed') addIssue(report, 'mcp-probe', ['mcp'])
+    }
+    report.issues = Object.values(report.features).flatMap(row => row.issues)
+    return summarize(report)
+  }
   return {
-    begin(reason = 'sync') { round = { roundId: randomUUID(), reason, startedAt: now().toISOString(), stages: {}, retries: [] } },
+    begin(reason = 'sync', features = null) {
+      const carried = {}
+      if (completed && features && [...features].every(feature => Object.hasOwn(featureGroups, feature))) {
+        const affected = new Set([...features].flatMap(feature => featureGroups[feature]))
+        const previous = completedReport(now())
+        for (const feature of FEATURES) if (!affected.has(feature)) carried[feature] = previous.features[feature]
+      }
+      round = { roundId: randomUUID(), reason, startedAt: now().toISOString(), stages: {}, retries: [], carried }
+    },
     token() { return round?.roundId ?? null },
     isCurrent(token) { return validRoundId(token) && round?.roundId === token },
     stage(feature, status, details = {}) {
@@ -246,23 +273,20 @@ export function createDiagnostics({ options = {}, now = () => new Date() } = {})
     retry(reason, features, targets) {
       if (round) round.retries.push({ code: Object.hasOwn(REASONS, reason) ? reason : 'sync-failed', features, targets })
     },
-    // Retain bounded facts from one completed round. Report JSON is only built
-    // on a read; later state mutations cannot alter the completed round.
+    // Retain bounded facts from one completed round. Build reports on demand
+    // for reads/partial-round carry; later state mutations cannot alter them.
     async complete({ state, total, capabilities } = {}) {
       if (!round) return
       completed = structuredClone({ ...round, options, state, total, capabilities, completedAt: now().toISOString(), probeStatus: null })
     },
     read({ syncing = false, watchDegraded = false } = {}) {
       const date = now()
-      const report = buildDiagnostics({ ...(completed ?? { options }), now: date })
+      const report = completedReport(date)
       if (!completed) { addIssue(report, 'report-missing', FEATURES, [], { pending: false }); summarize(report) }
-      if (completed?.probeStatus) {
-        report.features.mcp.probeStatus = completed.probeStatus
-        if (completed.probeStatus === 'failed') { addIssue(report, 'mcp-probe', ['mcp']); summarize(report) }
-      }
       if (watchDegraded) { addIssue(report, 'watch-error', FEATURES, [], { pending:false }); summarize(report) }
       const age = completed ? date.getTime() - Date.parse(completed.completedAt) : null
-      return { ...report, lastSyncedAt: completed?.completedAt ?? null, syncing, stale: age === null || age > 300_000 || age < -60_000 }
+      const oldFeature = Object.values(report.features).some(row => row.checkedAt && date.getTime() - Date.parse(row.checkedAt) > 300_000)
+      return { ...report, lastSyncedAt: completed?.completedAt ?? null, syncing, stale: age === null || age > 300_000 || age < -60_000 || oldFeature }
     },
     async probeResult(token, okay) {
       if (!validRoundId(token) || round?.roundId !== token || completed?.roundId !== token || typeof okay !== 'boolean') return false

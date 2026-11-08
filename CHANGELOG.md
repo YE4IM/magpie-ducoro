@@ -1,3 +1,27 @@
+## 0.4.3 — 2026-11-08
+
+0.4.3 优化同步性能与本地存储管理，通过技能缓存复用、管理记录增量保存和按目标重试，减少重复处理。新版集中提供备份管理，支持手动创建管理记录备份与配置检查点、导入外部备份、恢复预览及选择性配置回退，并提供本地记录清理功能。同时完善中英文界面与同步诊断，修复增量同步时诊断状态丢失的问题。升级沿用现有设置与管理记录，无需重新配置。
+
+0.4.3 improves synchronization performance and local storage management through shared skill caching, incremental record saves, and per-target retries. A centralized backup page lets you manually create management-record backups and configuration checkpoints, import external backups, preview restores, and selectively restore configuration. Local record cleanup helps manage accumulated data. This release also refines the Chinese and English interface and fixes diagnostic status being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
+
+- 新增独立备份管理页，两类备份支持打开当前备份目录；本地存储维护移至底部，同步诊断按进度、核验和排查分组。
+
+- 统一方案、弹窗和备份列表的按钮行间距与对齐，支持窄屏和中英文长文案换行。
+- 管理记录备份和配置检查点分别新增外部 JSON 导入及一键清空；导入先校验预览、仅写入备份列表，清空按对应类型确认并校验预览时的文件清单，保留当前状态与另一类备份。
+- 新增 8 项备份回归，合计 33 项通过；独立临时页面验证导入、清空及 390 像素窄屏，真实 Magpie 验证新增入口及系统文件选择器，未删除真实用户备份。
+- 实机修复：局部同步保留其他功能最近一次诊断及检查时间，未完成问题继续保留；全量同步重置旧结果，过期检查不会因其他功能更新而刷新。补充 4 项回归，合计 25 项通过，并完成真实 Magpie/Ducoro 接入、模型切换、读回及恢复测试。
+- 修复并发任务失败后提前结束、其他写入仍未完成的问题；异常时等待在途任务收尾并停止分配新任务。
+- 空状态快照按损坏处理并保留原件，避免被误当作首次安装继续同步。
+- 合并同一技能文件的并发读取，缓存清空后阻止旧读取重新填充，增加条目上限并修正异步淘汰时的容量统计。
+- 状态增量比较直接遍历对象，减少未变化指令内容的重复序列化；新增 7 项回归测试，合计 21 项通过。
+- 技能准备改为按内容摘要缓存，跨获授权 Bot 复用，保留逐目标导入与替换恢复。
+- 管理状态采用校验增量日志与完整快照，支持尾部中断恢复、序号去重、自动合并及旧记录迁移。
+- 记录各目标操作的期望版本、依赖、状态与尝试次数；失败重试限定功能及未完成操作。
+- 同步诊断页新增本地记录清理预览和执行入口；保护有效归属、未完成任务与使用中技能。
+- 自动限制已完成操作历史，回收过期未使用技能缓存，保留原备份和配置检查点数量上限。
+- 新增隔离自动化测试及可复现的写入量基准；未连接真实 Bot 执行修改。
+- 完成英文国际化：清理入口、动态预览、确认、成功反馈、错误及接口分组均支持中英文，切换语言保留弹窗和预览数据；更新英文使用与验收说明。产品创新功能不在本轮范围。
+
 # 更新记录
 
 ## 0.4.2 — 2026-11-07

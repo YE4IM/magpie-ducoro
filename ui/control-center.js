@@ -1,6 +1,7 @@
 (async () => {
   await DucoroUIReady;
   const {t,setText,statusLabel,featureLabel,settingLabel,dateTime}=DucoroI18n, $=id=>document.getElementById(id);
+  const {actions,mount}=DucoroBackupFiles;
   const el=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)setText(node,text);return node;};
   const button=(text,work)=>{const b=el('button',text);b.type='button';b.className='secondary';b.onclick=async()=>{b.disabled=true;try{await work();}catch(e){setText($('control-message'),t(e.localizedMessage??e.message));}finally{b.disabled=false;}};return b;};
   const field=(label,type='input')=>{const wrap=el('label',label),input=el(type);wrap.append(input);return {wrap,input};};
@@ -21,7 +22,7 @@
     targets.replaceChildren();for(const bot of DucoroResources.bots??[]){const row=el('label'),check=el('input');check.type='checkbox';check.value=bot.id;check.checked=!!selected&&draft.botPlans?.[bot.id]===selected;row.append(check,el('span',bot.name));targets.append(row);}
   }
   choices.onchange=()=>{selected=choices.value;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';refreshPlans();};
-  plans.append(button(t('更新方案草稿'),()=>{
+  plans.append(actions(button(t('更新方案草稿'),()=>{
     if(!name.input.value.trim())throw DucoroI18n.error(t('请填写方案名称'));
     const draft=DucoroWorkspace.collect(),id=selected||`plan-${crypto.randomUUID().slice(0,8)}`;
     const split=input=>[...new Set(input.value.split('\n').map(s=>s.trim()).filter(Boolean))];
@@ -31,14 +32,14 @@
     selected=id;DucoroWorkspace.stage(draft);refreshPlans();
   }),button(t('删除方案草稿'),()=>{
     if(!selected)return;const draft=DucoroWorkspace.collect();if(Object.values(draft.botPlans??{}).includes(selected))throw DucoroI18n.error(t('请先取消所有 Bot 对此方案的继承'));delete draft.botPlansCatalog[selected];selected='';DucoroWorkspace.stage(draft);choices.onchange();
-  }));
+  })));
   plans.append(el('p',t('空资源列表表示不分配；账户权限不会随方案复制。Bot 原有单项覆盖可在资源卡片中清除。')));
 
   const live=card('diagnostics',t('同步进度与耗时'));const progressBox=el('div');live.append(progressBox);
   let polling=false;
   const stepNames={'revoke-skills':t('撤销旧技能'),mcp:t('连接器'),skills:t('技能'),'instructions-subagents':t('指令与子代理'),accounts:t('账户权限'),models:t('模型')};
   async function progress(){if(polling||document.hidden)return;polling=true;try{const report=await ducoroApi('progress');progressBox.replaceChildren();const row=report.current;if(!row){progressBox.append(el('p',t('暂无同步记录')));return;}progressBox.append(el('p',row.running?t('正在同步'):t('本轮已结束')));for(const step of row.steps)progressBox.append(el('p',t`${stepNames[step.name]??step.name} · ${statusLabel(step.status)} · ${step.durationMs??0} ms`));if(row.metrics)progressBox.append(el('p',t`CLI：${row.metrics.calls} · 合并读取：${row.metrics.shared} · 文件读取：${row.metrics.reads??0} · 总耗时：${row.durationMs} ms`));const history=el('details');history.append(el('summary',t('最近同步记录')));for(const item of report.history??[])history.append(el('p',t`${dateTime(item.startedAt)} · ${item.durationMs} ms`));progressBox.append(history);}catch{}finally{polling=false;}}
-  live.append(button(t('刷新进度'),progress),button(t('重试待处理部分'),async()=>{await ducoroApi('retry-failed',{});await progress();}));
+  live.append(actions(button(t('刷新进度'),progress),button(t('重试待处理部分'),async()=>{await ducoroApi('retry-failed',{});await progress();})));
   setInterval(()=>{if(!$('diagnostics').hidden)void progress();},1500);
   document.addEventListener('ducoro-saving',()=>{void progress();});
 
@@ -59,15 +60,26 @@
     }
   }),driftBox);
 
-  const restore=card('diagnostics',t('配置检查点与选择性回退')),checkpointBox=el('div');
+  const restore=card('checkpoint-section',t('配置检查点与选择性回退')),checkpointBox=el('div');
+  restore.append(el('p',t('手动备份保存已保存的配置，不含草稿；列表显示与当前配置的差异。')));
   restore.append(el('p',t('检查点记录保存前后的期望配置。选定项目会恢复到草稿，仍需预览保存；资源正文及运行中会话不属于配置检查点。')));
-  restore.append(button(t('查看配置检查点'),async()=>{
-    const result=await ducoroApi('checkpoints');checkpointBox.replaceChildren();if(!result.checkpoints.length)checkpointBox.append(el('p',t('暂无配置检查点')));
-    for(const c of result.checkpoints){const details=el('details');details.append(el('summary',t`${dateTime(c.createdAt)} · ${c.changes.length}`));
-      for(const [index,row] of c.changes.entries()){const label=el('label'),check=el('input');check.type='checkbox';check.value=index;label.append(check,el('span',t`${settingLabel(row.key)} · ${row.target}`));details.append(label);details.append(el('p',t('保存前')),el('pre',JSON.stringify(row.before,null,2)),el('p',t('保存后')),el('pre',JSON.stringify(row.after,null,2)));}
-      details.append(button(t('将选定项目恢复到草稿'),async()=>{const selections=[...details.querySelectorAll('input:checked')].map(x=>Number(x.value));if(!selections.length)throw DucoroI18n.error(t('请选择要恢复的项目'));if(DucoroWorkspace.dirty())throw DucoroI18n.error(t('请先保存或处理当前草稿'));const result=await ducoroApi('rollback-preview',{id:c.id,selections});DucoroWorkspace.stage(result.options);}));checkpointBox.append(details);
+  async function refreshCheckpoints(){
+    const listing=await ducoroApi('checkpoints');checkpointBox.replaceChildren();if(!listing.checkpoints.length)checkpointBox.append(el('p',t('暂无配置检查点')));
+    for(const c of listing.checkpoints){const details=el('details');details.append(el('summary',t`${dateTime(c.createdAt)} · ${c.changes.length}`));
+      for(const [index,row] of c.changes.entries()){const label=el('label'),check=el('input');label.className='choice';check.type='checkbox';check.value=index;label.append(check,el('span',t`${settingLabel(row.key)} · ${row.target}`));details.append(label);details.append(el('p',t('保存前')),el('pre',JSON.stringify(row.before,null,2)),el('p',t('保存后')),el('pre',JSON.stringify(row.after,null,2)));}
+      details.append(button(t('将选定项目恢复到草稿'),async()=>{const selections=[...details.querySelectorAll('input:checked')].map(x=>Number(x.value));if(!selections.length)throw DucoroI18n.error(t('请选择要恢复的项目'));if(DucoroWorkspace.dirty())throw DucoroI18n.error(t('请先保存或处理当前草稿'));const result=await ducoroApi('rollback-preview',{id:c.id,selections,revision:listing.revision});DucoroWorkspace.stage(result.options);}));checkpointBox.append(details);
     }
-  }),checkpointBox);
+  }
+  const checkpointActions=actions(button(t('查看配置检查点'),refreshCheckpoints)),checkpointMessage=el('p');checkpointMessage.setAttribute('role','status');
+  restore.append(checkpointActions,checkpointMessage,checkpointBox);
+  mount({kind:'checkpoints',toolbar:checkpointActions,messageBox:checkpointMessage,refresh:refreshCheckpoints});
+  const diagnostics=$('diagnostics');
+  const group=(title,nodes)=>{const section=el('details');section.className='card';section.append(el('summary',t(title)),...nodes);diagnostics.append(section);};
+  const state=$('retry-state').closest('section'),verification=$('verify-results').closest('section');
+  group('进度与记录',[live]);
+  group('配置核验',[verification,drift]);
+  group('异常排查',[state]);
+  state.append(button(t('前往备份管理'),()=>document.querySelector('[data-tab="backups"]').click()));
   const note=el('p');note.id='control-message';note.setAttribute('role','status');$('save-bar').before(note);
   document.addEventListener('ducoro-workspace',refreshPlans);document.addEventListener('ducoro-inventory',refreshPlans);refreshPlans();
 })();

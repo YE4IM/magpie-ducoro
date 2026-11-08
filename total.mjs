@@ -37,7 +37,7 @@ export function renderSubagent(item) {
   return '---\n' + Object.entries(fields).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('\n') + '\n---\n' + item.prompt + '\n'
 }
 
-export function createTotalSync({ opts, paths, run, save, getState, requestRetry, log }) {
+export function createTotalSync({ operations, opts, paths, run, save, getState, requestRetry, log }) {
   const problem = (report, key, message) => {
     report.errors.push({ resource: key, message })
     requestRetry('total-resource')
@@ -116,8 +116,10 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
           } catch (e) { instructionReady = false; problem(report, 'instructions', e.message) }
         }
         for (const id of new Set([...ids, ...Object.keys(owned.profiles)])) {
+          const operation = operations ? await operations.begin('total',id,'instructions',{selected:ids.has(id),instructionReady,instructionText,enabled:opts.syncInstructions,extra:opts.botInstructions?.[id]}) : true
+          if (!operation) continue
           try {
-            if (instructionOn && ids.has(id) && !instructionReady) continue
+            if (instructionOn && ids.has(id) && !instructionReady) { await operations?.finish(operation,false); continue }
             const bot = await call(['agent', 'get', id])
             const record = bot?.agent ?? bot
             if (record.id !== id || typeof record.profile !== 'string') throw Error('unrecognized Ducoro Bot record')
@@ -134,7 +136,8 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
             if (next.block) owned.profiles[id] = { block: next.block }
             else delete owned.profiles[id]
             await save()
-          } catch (e) { problem(report, `instructions:${id}`, e.message) }
+            await operations?.finish(operation)
+          } catch (e) { await operations?.finish(operation,false); problem(report, `instructions:${id}`, e.message) }
         }
         report.features.instructions.status = (instructionOn || (opts.syncInstructions && Object.values(opts.botInstructions ?? {}).some(Boolean))) ? (instructionReady ? 'configured' : 'pending') : 'off'
         if ((opts.syncSubagents && selectedSubagents.length) || Object.keys(owned.files).length) {
@@ -163,6 +166,8 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
           }
           for (const [key, content] of wanted) {
             if (content === null) continue
+            const operation = operations ? await operations.begin('total',key.split('/')[0],`subagent:${key}`,content,['local-daemon']) : true
+            if (!operation) continue
             try {
               const [botId, name] = key.split('/')
               const dir = await safeDirectory(home, botId)
@@ -181,7 +186,8 @@ export function createTotalSync({ opts, paths, run, save, getState, requestRetry
               await save()
               const readback = await call(['agent', 'subagents', botId])
               if (readback?.warnings?.length) throw Error('Ducoro reports subagent projection warnings; inspect agent subagents')
-            } catch (e) { problem(report, `subagent:${key}`, e.message) }
+              await operations?.finish(operation)
+            } catch (e) { await operations?.finish(operation,false); problem(report, `subagent:${key}`, e.message) }
           }
           report.features.subagents.status = 'configured-with-limitations'
         }

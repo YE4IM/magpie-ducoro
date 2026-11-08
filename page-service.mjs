@@ -1,3 +1,5 @@
+import { previewLocalRecords, cleanLocalRecords } from "./local-records.mjs";
+import { openBackupDirectory, previewBackupImport, importBackupFile, previewBackupDeletion, clearBackupFiles, withBackupLock } from './backup-files.mjs';
 import { createCheckpoint, checkpoints, rollbackDraft, inspectDrift, revision, projectOptions } from "./control-center.mjs";
 import "./ui/plans.js";
 import "./ui/i18n.js";
@@ -11,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { readManagedState, stateBackups, previewStateBackup, restoreStateBackup } from "./state-store.mjs";
-import { deleteStateBackup } from "./state-store.mjs";
+import { createStateBackup, deleteStateBackup } from "./state-store.mjs";
 import { verifyConfiguration } from "./verification.mjs";
 import { rm } from "node:fs/promises";
 import { validateOptions } from "./options.mjs";
@@ -258,7 +260,52 @@ export async function createPageService({
         }
         if (req.headers["x-ducoro-token"] !== token)
           return reply(403, { error: "页面连接已更新，请重新读取页面" });
-        if (req.method === 'GET' && path === 'api/checkpoints') return reply(200, { checkpoints: await checkpoints(stateDir) });
+        if ((req.method === 'GET' && path === 'api/local-records') || (req.method === 'POST' && path === 'api/local-records/clean')) {
+          let body='';
+          if(req.method==='POST')for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'请求过大'});}
+          const lock=join(stateDir,'sync.lock');
+          try {await mkdir(lock);}catch(e){if(e.code==='EEXIST')return reply(409,{error:'正在同步，请完成后再清理本地记录。'});throw e;}
+          let result, failure;
+          try {
+            await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid}));
+            result=req.method==='GET'?await previewLocalRecords(stateDir):await cleanLocalRecords(stateDir,JSON.parse(body).token);
+          }catch(error){failure=error;}finally{await rm(lock,{recursive:true,force:true});}
+          if(failure) {
+            // Only authored public messages may cross the page API boundary.
+            const publicErrors={
+              '本地记录已变化，请重新预览后清理。':409,
+              '本地记录目录必须是普通目录。':422,
+              '管理记录正在更新，请稍后重试。':409,
+              '管理记录已损坏；原文件已保留，请恢复备份后重新读取。':409,
+              '管理记录版本未知，请恢复兼容的备份后重新读取。':409,
+            };
+            if(Object.hasOwn(publicErrors,failure.message))return reply(publicErrors[failure.message],{error:failure.message});
+            throw failure;
+          }
+          if(result.groups) result={...result,groups:result.groups.map(key=>translate(key,language)),groupMessages:result.groups.map(key=>message(key))};
+          return reply(200,result);
+        }
+        const backupAction = /^api\/backup-files\/(state|checkpoints)\/(import-preview|import|clear-preview|clear|open-directory|create)$/.exec(path);
+        if (backupAction && req.method === 'POST') {
+          const [,kind,action]=backupAction;
+          const chunks=[];let bytes=0;
+          for await(const chunk of req) {bytes+=chunk.length;if(bytes>16*1024*1024)return reply(413,{error:'备份文件过大，最大支持 8 MiB。'});chunks.push(chunk);}
+          let value;
+          try {value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!value||typeof value!=='object'||Array.isArray(value))throw Error();}
+          catch {return reply(400,{error:'备份文件格式无效。'});}
+          try {
+            if(action==='open-directory')return reply(200,await openBackupDirectory(stateDir,kind));
+            if(action==='import-preview')return reply(200,previewBackupImport(kind,value.content));
+            const result=await withBackupLock(stateDir,()=>{
+              if(action==='create')return kind==='state'?createStateBackup(join(stateDir,'state.json')):createCheckpoint(stateDir,options,options,true);
+              if(action==='import')return importBackupFile(stateDir,kind,value.content,value.token);
+              if(action==='clear-preview')return previewBackupDeletion(stateDir,kind);
+              return clearBackupFiles(stateDir,kind,value.token);
+            });
+            return reply(200,result);
+          } catch(error) {if(error.backupStatus)return reply(error.backupStatus,{error:error.message});throw error;}
+        }
+        if (req.method === 'GET' && path === 'api/checkpoints') return reply(200, { revision:revision(projectOptions(options)), checkpoints: await checkpoints(stateDir,options) });
         if (req.method === 'GET' && path === 'api/drift') {
           const loaded = await readManagedState(join(stateDir,'state.json'));
           return reply(200, await inspectDrift({options,state:loaded.state,paths,run,signal:requestController.signal}));
@@ -268,8 +315,10 @@ export async function createPageService({
           const value=JSON.parse(body);
           if(path==='api/checkpoints') {
             if(revision(projectOptions(value.before ?? {}))!==revision(projectOptions(options)))return reply(409,{error:'Configuration changed; reload before saving'});
-            return reply(200, {checkpoint:await createCheckpoint(stateDir,value.before,value.after)});
+            try {return reply(200, {checkpoint:await withBackupLock(stateDir,()=>createCheckpoint(stateDir,value.before,value.after))});}
+            catch(error) {if(error.backupStatus)return reply(error.backupStatus,{error:error.message});throw error;}
           }
+          if(value.revision && value.revision!==revision(projectOptions(options)))return reply(409,{error:'Configuration changed; reload before saving'});
           const result=await rollbackDraft(stateDir,value.id,value.selections,options);
           const loaded=await readManagedState(join(stateDir,'state.json'));
           const next=globalThis.DucoroPlans.resolve(result.options),current=globalThis.DucoroPlans.resolve(options);
@@ -458,6 +507,7 @@ export async function createPageService({
           "service-bridge.js",
           "resources.js",
           "reliability.js",
+          "backup-files.js",
           "plans.js",
           "control-center.js",
           "preview.js",
