@@ -1,3 +1,4 @@
+import {commandFailure} from './operation-controls.mjs';
 // Account connector assignments are Bot-local, independent of global library
 // definitions. Record previous policies so clearing a plugin assignment restores
 // user equipment, and stop on edits made outside this plugin.
@@ -18,8 +19,14 @@ export async function syncAccountConnectors({ options, state, run, save, operati
     return;
   const call = async (args) => {
     const response = await run(args, { timeoutMs: 20000 });
-    if (!response.ok) throw Error("账户连接器操作未完成；现有分配已保留");
+    if (!response.ok) throw Object.assign(Error("账户连接器操作未完成；现有分配已保留"),commandFailure(response));
     return response.json;
+  };
+  const catalog = new Map();
+  const catalogRead = args => {
+    const key = JSON.stringify(args);
+    if (!catalog.has(key)) catalog.set(key, call(args));
+    return catalog.get(key);
   };
   const bots = list(await call(["agent", "list"]), ["agents", "bots"]);
   const failures = [];
@@ -40,17 +47,16 @@ export async function syncAccountConnectors({ options, state, run, save, operati
           )
         )
           throw Error("Bot 不支持账户连接器");
+        const slugs = accountOrder(desired[id], owned[id]).filter(slug => revoking ? !desired[id]?.[slug] : !!desired[id]?.[slug]);
+        if (!slugs.length) continue;
         const current = new Map(
           policyRows(await call(["agent", "connector", "list", id])).map(
             (x) => [x.slug, x],
           ),
         );
         const history = (owned[id] ??= {});
-        for (const slug of accountOrder(desired[id], history).filter((slug) =>
-          revoking ? !desired[id]?.[slug] : !!desired[id]?.[slug],
-        )) {
-          const operation = operations ? await operations.begin('accounts',id,slug,{want:desired[id]?.[slug]??null,resolution:options.accountResolutions?.[id]?.[slug]},['account-catalog']) : true;
-          if (!operation) continue;
+        for (const slug of slugs) {
+          let operation;
           try {
             const want = desired[id]?.[slug] ?? null;
             const record = history[slug];
@@ -64,11 +70,11 @@ export async function syncAccountConnectors({ options, state, run, save, operati
             if (transition.conflict) throw Error("连接器配备已由其他页面修改");
             const next = transition.next;
             if (want && !transition.keepExternal) {
-              const status = await call(["mcp", "catalog", "status", slug]);
+              const status = await catalogRead(["mcp", "catalog", "status", slug]);
               if ((status.status ?? status.connection?.status) !== "connected")
                 throw Error("账户连接器尚未连接");
               const tools = new Set(
-                toolRows(await call(["mcp", "catalog", "tools", slug])).map(
+                toolRows(await catalogRead(["mcp", "catalog", "tools", slug])).map(
                   (x) => x.slug,
                 ),
               );
@@ -78,6 +84,10 @@ export async function syncAccountConnectors({ options, state, run, save, operati
               )
                 throw Error("工具权限无效或已变化");
             }
+            const unchanged = same(actual, next) && record && !Object.hasOwn(record, 'pending') && same(record.applied, next) && !transition.resolved && !transition.keepExternal;
+            operation = operations ? await operations.begin('accounts',id,slug,{want,resolution:options.accountResolutions?.[id]?.[slug]},['account-catalog'],unchanged) : true;
+            if (!operation) continue;
+            if (unchanged) { await operations?.finish(operation); continue; }
             if (!same(actual, next)) {
               const latest =
                 policyRows(await call(["agent", "connector", "list", id])).find(
@@ -133,7 +143,8 @@ export async function syncAccountConnectors({ options, state, run, save, operati
             await save();
             await operations?.finish(operation);
           } catch (error) {
-            await operations?.finish(operation,false);
+            operation??=await operations?.begin('accounts',id,slug,{want:desired[id]?.[slug]??null,resolution:options.accountResolutions?.[id]?.[slug]},['account-catalog']);
+            await operations?.finish(operation,false,[],error);
             failures.push({ botId: id, slug, reason: error.message });
           }
         }

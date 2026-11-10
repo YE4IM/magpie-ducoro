@@ -1,3 +1,4 @@
+import { defHash, totalTargets } from './resource-fingerprint.mjs';
 import { readCachedFile } from "./file-cache.mjs";
 // Read-only fingerprints. No resource body, credentials, or local paths leave this module.
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { renderSubagent } from './total.mjs';
 import './ui/i18n.js';
 const { message } = globalThis.DucoroI18n;
 const digest = text => createHash('sha256').update(text).digest('hex');
-export async function skillFingerprint(source) {
+export async function skillFingerprint(source, { includeModes = true, modeMask = 0o777 } = {}) {
   const root = await realpath(source), files = [];
   const walk = async (dir, rel = '', parents = new Set()) => {
     const target = await realpath(dir);
@@ -37,7 +38,7 @@ export async function skillFingerprint(source) {
       if (names.has(token)) return match;
       return /^v?\d+(?:\.\d+)+(?:\.[xX*])?(?:-[a-zA-Z0-9.-]+)?$/.test(token) || /^[a-zA-Z0-9_-]+\.(?:cmd|exe|bat)$/i.test(token) ? `<code>${token}</code>` : match;
     }));
-    hash.update(JSON.stringify([file.name, bytes.length, file.mode])).update(bytes);
+    hash.update(JSON.stringify(includeModes ? [file.name, bytes.length, file.mode & modeMask] : [file.name, bytes.length])).update(bytes);
   }
   return { hash: hash.digest('hex'), fileCount: files.length };
 }
@@ -76,11 +77,11 @@ export async function contentChanges({ paths, state, options, bots }) {
         const http = type === 'http' || type === 'sse' || (!def.command && def.url);
         if (def.disabled || def.enabled === false || (!http && !def.command)) continue;
         const normalized = { name: source.name, transport: http ? (type === 'sse' ? 'sse' : 'http') : 'stdio', command: http ? null : String(expand(def.command)), args: http ? null : (def.args ?? []).map(x=>String(expand(x))), url: http ? String(expand(def.url)).trim() : null, headers:canon(http ? pairs(def.headers) : []), env:canon(http ? [] : pairs(def.env)), disabledTools:(Array.isArray(source.disabledTools) ? source.disabledTools.map(String) : []).sort() };
-        if (digest(JSON.stringify(normalized)) !== record.hash) changes.push({ scope:record.scope ?? 'global', kind:'mcp', name:source.name, action:'update', summary:'同名连接器的配置或工具权限发生变化；敏感字段不展示' });
+        if (defHash({...normalized, headers: http ? pairs(def.headers) : [], env: http ? [] : pairs(def.env)}) !== record.hash) changes.push({ scope:record.scope ?? 'global', kind:'mcp', name:source.name, action:'update', summary:'同名连接器的配置或工具权限发生变化；敏感字段不展示' });
       } catch { changes.push({ scope:record.scope ?? 'global', kind:'mcp', name:source.name, action:'unknown', summary:'连接器内容暂不可核对，保留现状并等待核实' }); }
     }
   }
-  const targets = bots.filter(bot => !options.targetAgents?.length || options.targetAgents.includes(bot.id));
+  const targets = totalTargets(bots, options);
   if (options.syncInstructions && ((enabled(library.instructions) && library.instructions.agents?.includes('ducoro')) || Object.values(options.botInstructions ?? {}).some(Boolean))) {
     try {
       let sourceText = '';

@@ -1,4 +1,5 @@
-import { OFFICIAL_PROVIDERS } from "./model-capabilities.mjs";
+import {backupMetadata,pruneBackups} from './backup-metadata.mjs';
+import { DEFAULTS } from "./defaults.mjs";
 import { readFile, writeFile, mkdir, readdir, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,7 +8,7 @@ import { mapLimit } from './performance.mjs';
 import { modelEligible, modelTarget } from './model-sync.mjs';
 import { list } from './inventory-shapes.mjs';
 import './ui/plans.js';
-const defaults = { botPlansCatalog:{},botPlans:{},botInstructions:{},pausedModels:[],modelGuards:{},botModels:{},resourceAssignments:{},accountConnectors:{},accountResolutions:{},modelScope:'global',mcpScope:'global',skillsScope:'global',syncConnection:true,syncAgentModels:true,syncMcp:true,syncSkills:true,syncInstructions:true,syncSubagents:true,subagentNames:[],targetAgents:[],modelCapabilityRefs:{},officialProviders:OFFICIAL_PROVIDERS,prune:true,onDisconnect:'keep',connectionSlug:'magpie-ducoro' };
+const defaults = globalThis.DucoroDefaultOptions;
 const maps = new Set(['botPlansCatalog','botPlans','botInstructions','modelGuards','botModels','resourceAssignments','accountConnectors','accountResolutions','modelCapabilityRefs']);
 export const stable = value => JSON.stringify(value, (_, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x);
 export const revision = value => createHash('sha256').update(stable(value) ?? 'undefined').digest('hex');
@@ -40,14 +41,14 @@ export async function createCheckpoint(stateDir, before, after, snapshot=false) 
   const dir=join(stateDir,'configuration-checkpoints');await mkdir(dir,{recursive:true,mode:0o700});
   const file=join(dir,checkpoint.id+'.json'),temp=file+'.tmp';
   try {await writeFile(temp,JSON.stringify(checkpoint),{mode:0o600,flag:'wx'});await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}
-  const records=await checkpoints(stateDir);for(const old of records.slice(20))await unlink(join(dir,old.id+'.json')).catch(()=>{});
+  const records=await checkpoints(stateDir);await pruneBackups(dir,records.map(row=>row.id),20);
   return {id:checkpoint.id,createdAt:checkpoint.createdAt,changes:checkpoint.changes};
 }
 export async function checkpoints(stateDir, current) {
   const dir=join(stateDir,'configuration-checkpoints');const result=[];
   for(const file of await readdir(dir).catch(e=>{if(e.code==='ENOENT')return [];throw e;})) {
     if(!/^[a-f0-9-]{36}\.json$/.test(file))continue;
-    try {const c=validateCheckpoint(JSON.parse(await readFile(join(dir,file),'utf8')));if(file!==c.id+'.json')continue;result.push({id:c.id,createdAt:c.createdAt,changes:c.snapshot&&current?optionChanges(c.before,projectOptions(current)):c.changes});}catch{}
+    try {const c=validateCheckpoint(JSON.parse(await readFile(join(dir,file),'utf8')));if(file!==c.id+'.json')continue;result.push({id:c.id,createdAt:c.createdAt,...await backupMetadata(dir,c.id),changes:c.snapshot&&current?optionChanges(c.before,projectOptions(current)):c.changes});}catch{}
   }
   return result.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
@@ -56,7 +57,8 @@ export async function rollbackDraft(stateDir,id,selections,current) {
   const c=validateCheckpoint(JSON.parse(await readFile(join(stateDir,'configuration-checkpoints',id+'.json'),'utf8')));
   if(c.id!==id)throw Error('Invalid checkpoint');
   const rows=optionChanges(c.before,c.snapshot?projectOptions(current):c.after), draft=structuredClone(current), normalized=projectOptions(current);
-  for(const index of new Set(selections)) {
+  selections=rollbackSelections(rows,selections);
+  for(const index of selections) {
     if(!Number.isInteger(index)||!rows[index])throw Error('Invalid checkpoint selection');
     const row=rows[index],actual=maps.has(row.key)?normalized[row.key]?.[row.target]:normalized[row.key];
     if(stable(actual)!==stable(row.afterPresent?row.after:undefined))throw Error('Configuration changed since checkpoint; refresh before restoring');
@@ -64,7 +66,7 @@ export async function rollbackDraft(stateDir,id,selections,current) {
     else draft[row.key]=structuredClone(row.before);
   }
   if(validateOptions(draft).length)throw Error('Select related plan changes together to retain valid assignments');
-  return {options:draft,revision:revision(projectOptions(current)),changes:optionChanges(normalized,projectOptions(draft))};
+  return {options:draft,selections,revision:revision(projectOptions(current)),changes:optionChanges(normalized,projectOptions(draft))};
 }
 export async function inspectDrift({options,state,paths,run,signal}) {
   const resolved=globalThis.DucoroPlans.resolve(options), rows=[];
@@ -90,4 +92,21 @@ export async function inspectDrift({options,state,paths,run,signal}) {
   // Resource list membership does not prove content identity or session loading.
   for(const feature of ['mcp','skills','subagents'])rows.push({feature,target:'global',status:'unknown',readOnly:true});
   return {updatedAt:new Date().toISOString(),rows,runtimeLoaded:'unknown'};
+}
+
+// A plan binding depends on its catalog and resource scope; catalog removal also
+// needs the bindings that stop referring to it. Include only changed rows.
+export function rollbackSelections(rows,selected){
+  const result=new Set(selected);
+  for(const index of result)if(!Number.isInteger(index)||!rows[index])throw Error('Invalid checkpoint selection');
+  let changed=true;
+  while(changed){changed=false;for(const index of [...result]){
+    const row=rows[index];
+    for(const [i,other] of rows.entries()){
+      const needed=(row.key==='botPlans' && (other.key==='botPlansCatalog'&&[row.before,row.after].includes(other.target)||['modelScope','mcpScope','skillsScope'].includes(other.key)))
+        ||(row.key==='botPlansCatalog'&&other.key==='botPlans'&&[other.before,other.after].includes(row.target));
+      if(needed&&!result.has(i)){result.add(i);changed=true;}
+    }
+  }}
+  return [...result].sort((a,b)=>a-b);
 }

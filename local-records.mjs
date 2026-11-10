@@ -1,3 +1,4 @@
+import {backupMetadata,removeBackupMetadata} from './backup-metadata.mjs';
 import { readdir, lstat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -16,7 +17,7 @@ async function candidates(dir,state,{automatic=false}={}) {
     const info=await lstat(join(dir,name)).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
     if(info && (!info.isDirectory()||info.isSymbolicLink()))throw Error('本地记录目录必须是普通目录。');
   }
-  if(!automatic)for(const name of await names(join(dir,'state-backups')))if(/^[a-f0-9]{64}\.json$/.test(name))rows.push({kind:'备份',relative:'state-backups/'+name});
+  if(!automatic)for(const name of await names(join(dir,'state-backups')))if(/^[a-f0-9]{64}\.json$/.test(name)&&!(await backupMetadata(join(dir,'state-backups'),name.slice(0,-5))).retained)rows.push({kind:'备份',relative:'state-backups/'+name});
   const used=new Set(Object.values(state.skills??{}).flatMap(row=>[row.hash,row.replacement?.previousHash,row.replacement?.nextHash].filter(Boolean)));
   const root=join(dir,'skill-artifacts');
   for(const name of await names(root)) {
@@ -47,7 +48,7 @@ export async function cleanLocalRecords(dir,token) {
   await compactManagedState(file,{keepBackup:false});
   // Re-enumerate backups: a threshold checkpoint during save may create one.
   const rows=await candidates(dir,state);
-  for(const row of rows)await rm(join(dir,row.relative),{recursive:true,force:true});
+  for(const row of rows){await rm(join(dir,row.relative),{recursive:true,force:true});if(row.relative.startsWith('state-backups/'))await removeBackupMetadata(join(dir,'state-backups'),row.relative.split('/')[1].slice(0,-5));}
   return {deletedFiles:rows.length,deletedRecords:preview.completed,releasedBytes:Math.max(0,before-await size(dir))};
 }
 export async function maintainLocalRecords(dir,state,save) {

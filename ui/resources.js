@@ -536,11 +536,14 @@
     }
     function applyFilters() {
       const query = $("bot-search").value.trim().toLowerCase(), filter = $("bot-filter").value;
+      const botsById = new Map((data?.bots ?? []).map(bot => [bot.id, bot]));
+      const rowsById = new Map((comparison?.rows ?? []).map(row => [row.id, row]));
+      const failedIds = new Set(issues.flatMap(issue => issue.targets ?? []));
       let visible = 0;
       for (const card of $("assignments").children) {
-        const id = card.dataset.botId, bot = data?.bots?.find(x => x.id === id);
-        const row = comparison?.rows?.find(x => x.id === id);
-        const flags = { changed: changedBot(id), conflict: row?.accounts?.some(x => x.action === "conflict"), unavailable: row?.model?.status === "unavailable", failed: issues.some(x => x.targets?.includes(id)) || row?.accountsUnknown };
+        const id = card.dataset.botId, bot = botsById.get(id);
+        const row = rowsById.get(id);
+        const flags = { changed: changedBot(id), conflict: row?.accounts?.some(x => x.action === "conflict"), unavailable: row?.model?.status === "unavailable", failed: failedIds.has(id) || row?.accountsUnknown };
         card.hidden = !(`${bot?.name} ${id}`.toLowerCase().includes(query) && (filter === "all" || flags[filter]));
         if (!card.hidden) visible++;
       }
@@ -586,17 +589,27 @@
       cancel.onclick = () => dialog.close();
       dialog.append(notice, DucoroBackupFiles.actions(preview,apply,cancel)); dialog.addEventListener("close", () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
     });
+    const botCards=new Map();
     function render() {
+      const openDetails = new Set([...$("assignments").querySelectorAll("details[open]")].map(node => `${node.closest('[data-bot-id]')?.dataset.botId}:${node.className}`));
       if (
         activeDrawer &&
         data?.bots &&
         !data.bots.some((bot) => bot.id === activeDrawer.botId)
       )
         closeAccountDrawer();
-      $("assignments").replaceChildren();
+      const roster=new Set((data?.bots??[]).map(bot=>bot.id));
+      for(const [id,cached] of botCards)if(!roster.has(id)){cached.node.remove();botCards.delete(id);}
+      const comparisons=new Map((comparison?.rows??[]).map(row=>[row.id,row]));
+      const shared=JSON.stringify([data?.library,data?.models,data?.capabilities,data?.defaultModel,draft.targetAgents,draft.connectionSlug,draft.syncAgentModels,draft.syncConnection,draft.modelScope,draft.mcpScope,draft.skillsScope,draft.botPlansCatalog,document.documentElement.lang]);
       $("assignment-empty").hidden = !data?.bots || data.bots.length > 0;
       if (!data?.bots) return;
+      let cursor=$('assignments').firstElementChild;
+      const place=node=>{if(node===cursor)cursor=cursor.nextElementSibling;else $('assignments').insertBefore(node,cursor);};
       for (const bot of data.bots) {
+        const signature=shared+JSON.stringify([bot,draft.botModels?.[bot.id],draft.botPlans?.[bot.id],draft.resourceAssignments?.[bot.id],draft.accountConnectors?.[bot.id],draft.accountResolutions?.[bot.id],comparisons.get(bot.id)]);
+        const cached=botCards.get(bot.id);
+        if(cached?.signature===signature){place(cached.node);const freshness=cached.node.querySelector('.comparison-freshness');if(freshness&&comparison)DucoroI18n.setText(freshness,t`读取于 ${DucoroI18n.dateTime(comparison.updatedAt,true)}`);updateAccountSummary(bot.id);continue;}
         const card = el("section", undefined, "assignment-row");
         card.dataset.botId = bot.id;
         const heading = el("div", undefined, "bot-heading");
@@ -619,7 +632,7 @@
           libraryField(bot, "skills", t("技能"), "skillsScope"),
         );
         card.append(grid);
-        const row = comparison?.rows?.find((x) => x.id === bot.id);
+        const row = comparisons.get(bot.id);
         if (row) {
           const details = el("details", undefined, "bot-comparison");
           details.append(
@@ -637,12 +650,14 @@
           );
           card.append(details);
         }
-        $("assignments").append(card);
+        if(cached){cached.node.replaceChildren(...card.childNodes);cached.signature=signature;place(cached.node);}
+        else {botCards.set(bot.id,{node:card,signature});place(card);}
         updateAccountSummary(bot.id);
         if (document.body.dataset.busy === "true")
           for (const input of card.querySelectorAll("input,select,button"))
             input.disabled = true;
       }
+      for (const node of $("assignments").querySelectorAll("details")) node.open = openDetails.has(`${node.closest('[data-bot-id]')?.dataset.botId}:${node.className}`);
       applyFilters();
     }
     globalThis.DucoroResources = {
@@ -702,6 +717,7 @@
         Object.assign(draft, values);
         render();
       },
+      get inventory() { return structuredClone(data); },
       get bots() { return data?.bots ?? []; },
       get refreshing() {
         return refreshBusy;
@@ -760,7 +776,7 @@
           );
           try {
             const nextComparison = await ducoroApi("preview", snapshot, {
-              signal,
+              inventoryToken: next.inventoryToken, signal,
             });
             if (request !== requestId || revision !== draftRevision) return;
             comparison = nextComparison;

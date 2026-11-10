@@ -304,7 +304,42 @@
       return options;
     }
 
-    globalThis.DucoroWorkspace = { collect, ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
+    let undoDraft = null;
+    let draftWrite=Promise.resolve(),draftRevision=null,draftTimer,pendingDraft=null;
+    const draftStatus=document.createElement('span');draftStatus.setAttribute('role','status');
+    if(!panel)$('save-bar').append(draftStatus);
+    const draftReady=panel?Promise.resolve():ducoroApi('draft').then(saved=>{draftRevision=saved.revision??null;}).catch(()=>{});
+    const flushDraft=()=>{
+      clearTimeout(draftTimer);
+      if(!pendingDraft)return draftWrite;
+      const value=pendingDraft;pendingDraft=null;
+      draftWrite=draftWrite.catch(()=>{}).then(async()=>{
+        await draftReady;DucoroI18n.setText(draftStatus,t('草稿保存中'));
+        const result=await ducoroApi('draft',{...value,revision:draftRevision});
+        if(result.conflict)throw Error('Draft changed in another page; restore or reload before editing.');
+        draftRevision=result.revision??null;DucoroI18n.setText(draftStatus,t('草稿已保存'));
+      });
+      draftWrite.catch(error=>DucoroI18n.setText(draftStatus,t('草稿保存失败')+': '+error.message));
+      return draftWrite;
+    };
+    const project = options => Object.fromEntries(EDITABLE_KEYS.map(key => [key, options[key]]));
+    const persistDraft = () => {
+      if(panel || !ready || busy || (!hasChanges()&&!globalThis.DucoroPlanEditor?.snapshot()?.dirty))return;
+      try{pendingDraft={base:project(baseline),options:project(collect()),editor:globalThis.DucoroPlanEditor?.snapshot()??null};}
+      catch(error){DucoroI18n.setText(draftStatus,t('草稿保存失败')+': '+error.message);return;}
+      clearTimeout(draftTimer);draftTimer=setTimeout(()=>void flushDraft(),350);
+    };
+    const restoreButton = document.createElement('button');restoreButton.type='button';DucoroI18n.setText(restoreButton,t('恢复本地草稿'));
+    const undoButton = document.createElement('button');undoButton.type='button';DucoroI18n.setText(undoButton,t('撤销最近批量修改'));
+    restoreButton.className=undoButton.className='secondary';
+    if(!panel) $('save-bar').querySelector('div').append(restoreButton,undoButton);
+    restoreButton.onclick=async()=>{try{clearTimeout(draftTimer);pendingDraft=null;await draftWrite.catch(()=>{});const saved=await ducoroApi('draft');draftRevision=saved.revision??null;if(!saved.options)return message(t('没有可恢复的本地草稿'));
+      if(JSON.stringify(saved.base)!==JSON.stringify(project(baseline)))return message(t('配置已变化，旧草稿未恢复'));
+      DucoroWorkspace.stage({...collect(),...saved.options});globalThis.DucoroPlanEditor?.restore(saved.editor);}catch{message(t('没有可恢复的本地草稿'));}};
+    undoButton.onclick=()=>{if(undoDraft){const value=undoDraft;undoDraft=null;populate(optionsForDisplay(value),true);dirty();document.dispatchEvent(new Event('ducoro-workspace'));}};
+    addEventListener('pagehide',()=>{persistDraft();void flushDraft();});
+    document.addEventListener('ducoro-editor-change',persistDraft);
+    globalThis.DucoroWorkspace = { collect, ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); undoDraft=collect(); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
 
     function hasChanges() {
       if (!ready) return false;
@@ -329,6 +364,7 @@
         changed ? t("有未保存的修改") : t("设置与已读取配置一致"),
       );
       $("save").disabled = !changed;
+      persistDraft();
     }
 
     function setBusy(value) {
@@ -415,6 +451,8 @@
         const savedAt = Date.now();
         const watch = ++syncWatch;
         const saved = await globalThis.magpie.options.set(options);
+        await flushDraft().catch(()=>{});
+        if(!panel)await ducoroApi('draft',{clear:true,revision:draftRevision}).then(result=>{if(!result.conflict)draftRevision=result.revision??null;}).catch(()=>{});
         baseline = optionsForDisplay(saved ?? options);
         populate(baseline);
         message(t("设置已保存，正在同步。稍后刷新报告可查看结果。"));

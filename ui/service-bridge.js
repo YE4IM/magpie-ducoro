@@ -77,7 +77,7 @@
       globalThis.DucoroI18n.applyDocument(value.lang);
       globalThis.DucoroLanguageInitialized = true;
     });
-    globalThis.ducoroApi = async (path, body, { signal } = {}) => {
+    globalThis.ducoroApi = async (path, body, { signal, inventoryToken } = {}) => {
       const deadline = Date.now() + (path === "preview" ? 45000 : 25000);
       let response;
       for (let attempt = 0; ; attempt++) {
@@ -86,7 +86,9 @@
           response = await fetch(`api/${path}`, {
             method: body === undefined ? "GET" : "POST",
             cache: "no-store",
+            keepalive: path === "draft" && body !== undefined && new TextEncoder().encode(JSON.stringify(body)).length < 60000,
             headers: {
+              ...(inventoryToken ? {'x-ducoro-inventory':inventoryToken} : {}),
               "X-Ducoro-Language": document.documentElement.lang,
               "X-Ducoro-Token": document.querySelector(
                 'meta[name="ducoro-token"]',

@@ -1,3 +1,5 @@
+import {backupMetadata,updateBackupMetadata,removeBackupMetadata} from './backup-metadata.mjs';
+import { acquireSyncLock } from "./sync-lock.mjs";
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
@@ -80,6 +82,7 @@ async function deletionFiles(stateDir,kind) {
     if(!typeFor(kind).pattern.test(name))continue;
     const info=await lstat(join(dir,name),{bigint:true});
     if(!info.isFile()||info.isSymbolicLink())continue;
+    if((await backupMetadata(dir,name.slice(0,-5))).retained)continue;
     files.push({name,bytes:Number(info.size),stamp:[info.ino,info.size,info.mtimeNs,info.ctimeNs].join(':')});
   }
   return {dir,files};
@@ -93,17 +96,14 @@ export async function clearBackupFiles(stateDir,kind,token) {
   if(token!==preview.token)throw fail('本地备份已变化，请重新预览后删除。',409);
   const {dir,files}=await deletionFiles(stateDir,kind);
   if(hash(JSON.stringify([kind,files]))!==token)throw fail('本地备份已变化，请重新预览后删除。',409);
-  for(const file of files)await unlink(join(dir,file.name));
+  for(const file of files){await unlink(join(dir,file.name));await removeBackupMetadata(dir,file.name.slice(0,-5));}
   return {deleted:files.length};
 }
 // All callers, including checkpoint creation, share the sync writer lock.
 export async function withBackupLock(stateDir,work) {
-  await mkdir(stateDir,{recursive:true,mode:0o700});
-  const lock=join(stateDir,'sync.lock');
-  try { await mkdir(lock); }
-  catch(error) { if(error.code==='EEXIST')throw fail('正在同步，请完成后再操作备份。',409);throw error; }
-  try { await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid}),{mode:0o600});return await work(); }
-  finally { await rm(lock,{recursive:true,force:true}); }
+  const release=await acquireSyncLock(stateDir);
+  if(!release)throw fail('正在同步，请完成后再操作备份。',409);
+  try {return await work();} finally {await release();}
 }
 
 export async function openBackupDirectory(stateDir,kind,{platform=process.platform,run=promisify(execFile)}={}) {
@@ -114,4 +114,14 @@ export async function openBackupDirectory(stateDir,kind,{platform=process.platfo
   try {await run(command,[resolve(dir)],{timeout:10000,windowsHide:true});}
   catch {throw fail('无法打开备份目录，请检查本机文件管理器是否可用。');}
   return {opened:true};
+}
+
+export async function backupFileAction(stateDir,kind,id,action,value){
+  const type=typeFor(kind);if(!type.pattern.test(id+'.json'))throw fail('Invalid backup id');
+  const {dir}=await directory(stateDir,kind),path=join(dir,id+'.json');
+  const info=await lstat(path);if(!info.isFile()||info.isSymbolicLink()||info.size>MAX_BACKUP_BYTES)throw fail('Invalid backup file');
+  const content=await readFile(path,'utf8');parseImport(kind,content);
+  if(kind==='state'&&hash(content)!==id)throw fail('Backup checksum differs');
+  if(action==='export')return {filename:id+'.json',content};
+  return updateBackupMetadata(dir,id,value);
 }

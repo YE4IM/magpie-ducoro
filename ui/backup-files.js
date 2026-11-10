@@ -63,5 +63,13 @@
       }catch(error){notice(t(error.localizedMessage??error.message));busy(false);}
     };
   }
-  globalThis.DucoroBackupFiles={actions,mount};
+  function details(kind,backup,refresh){
+    const box=el('div'),name=el('input'),note=el('textarea'),retain=el('input'),status=el('p');box.className='backup-details';retain.type='checkbox';retain.checked=!!backup.retained;name.value=backup.name??'';note.value=backup.note??'';
+    for(const [title,input] of [[t('备份名称'),name],[t('备份备注'),note],[t('保留此备份'),retain]]){const label=el('label',title);label.append(input);box.append(label);}
+    const save=el('button',t('保存备份信息')),download=el('button',t('导出备份'));save.type=download.type='button';save.className=download.className='secondary';
+    save.onclick=async()=>{save.disabled=true;try{await ducoroApi(`backup-files/${kind}/metadata`,{id:backup.id,name:name.value,note:note.value,retained:retain.checked});await refresh();}catch(e){setText(status,e.message);}finally{save.disabled=false;}};
+    download.onclick=async()=>{download.disabled=true;try{const result=await ducoroApi(`backup-files/${kind}/export`,{id:backup.id});const url=URL.createObjectURL(new Blob([result.content],{type:'application/json'})),link=el('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setText(status,e.message);}finally{download.disabled=false;}};
+    box.append(actions(save,download),status);return box;
+  }
+  globalThis.DucoroBackupFiles={actions,mount,details};
 })();

@@ -46,10 +46,24 @@
       const body=el('div',undefined,'preview-body')
       for(const warning of data.warningMessages??data.warnings)body.append(el('p',t(warning),'notice'))
       if(data.blocked)body.append(el('p',t('请先恢复管理记录或数据来源，再重新预览。同步诊断中可重新读取管理记录。'),'notice error'))
-      for(const row of data.rows)body.append(renderRow(row,(id,item,mode)=>{
+      const changed = row => ['change','unavailable','unknown'].includes(row.model?.status) || row.accountsUnknown || row.resources.some(x => !['keep','unmanaged'].includes(x.action)) || row.accounts.some(x => !['keep','unmanaged'].includes(x.action));
+      const conflicted = row => row.accountsUnknown || row.accounts.some(x => x.action === 'conflict');
+      const affected = data.rows.filter(changed).length;
+      dialog.append(el('p',t`受影响 Bot：${affected}`));
+      const additions=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>x.action==='add').length,0);
+      const removals=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>['remove','restore'].includes(x.action)).length,0);
+      dialog.append(el('p',t`新增：${additions} · 撤销：${removals}`));
+      if(['modelScope','mcpScope','skillsScope'].some(key=>options[key]==='agents'))dialog.append(el('p',t('按 Bot 分配会替换插件的全局分配，请检查所有受影响 Bot。'),'notice'));
+      const filter=el('select');
+      for(const [value,label] of [['all','全部'],['changed','只看变化'],['conflict','只看冲突']]) {const option=el('option',t(label));option.value=value;filter.append(option);}
+      DucoroI18n.setAttribute(filter,'aria-label',t('筛选变更'));
+      dialog.append(filter);
+      const rendered=[];
+      for(const row of data.rows){const node=renderRow(row,(id,item,mode)=>{
         globalThis.DucoroResources.resolveConflict(id,item,mode)
         dialog.close('resolved')
-      }))
+      });rendered.push({row,node});body.append(node);}
+      filter.onchange=()=>{for(const {row,node} of rendered)node.hidden=filter.value==='changed'?!changed(row):filter.value==='conflict'?!conflicted(row):false;};
       const caps=el('details');caps.append(el('summary',t('宿主能力检测')))
       const labels={modelCatalog:t('上游模型目录'),botModelWrite:t('Bot 模型命令'),accountPolicy:t('账户权限读取'),accountAdd:t('账户配备命令'),accountUpdate:t('账户权限更新命令'),accountRemove:t('账户撤销命令'),botMcp:t('按 Bot 连接器'),botSkills:t('按 Bot 技能')}
       for(const [key,value]of Object.entries(data.capabilities))caps.append(el('p',t`${labels[key]??key}：${value==='available'?t('本地命令可用，执行权限仍需同步时核实'):value==='unavailable'?t('当前不可用，其他功能可独立同步'):t('尚未确认')}`))

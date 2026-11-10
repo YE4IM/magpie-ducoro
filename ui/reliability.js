@@ -18,7 +18,7 @@
       }
       if(result.error) throw Error(result.error);
       box.replaceChildren(el("p", t`核验时间：${result.updatedAt ? dateTime(result.updatedAt) : t("尚无记录")} · 运行中会话加载状态：待核实`));
-      for (const row of result.rows ?? []) box.append(el("p", t`${row.target} · ${{connection:t("网关连接"),models:t("模型"),mcp:t("连接器"),skills:t("技能"),instructions:t("指令"),subagents:t("子代理"),accountConnectors:t("账户权限")}[row.feature] ?? row.feature} · ${{verified:t("已写入并核验"),failed:t("核验失败"),unknown:t("待核实"),skipped:t("已跳过")}[row.status] ?? t("待核实")}：${t(row.message ?? "")}`));
+      for (const row of result.rows ?? []) box.append(el("p", t`${row.target} · ${{connection:t("网关连接"),models:t("模型"),mcp:t("连接器"),skills:t("技能"),instructions:t("指令"),subagents:t("子代理"),accountConnectors:t("账户权限")}[row.feature] ?? row.feature} · ${{verified:t("已写入并核验"),failed:t("核验失败"),unknown:t("待核实"),skipped:t("已跳过")}[row.status] ?? t("待核实")}：${t(row.message ?? "")}${row.digest?' · '+row.digest:''}${row.missingEvidence?' · '+t(row.missingEvidence):''}${row.nextStep?' · '+t(row.nextStep):''}${row.permissionEvidence?' · '+t(row.permissionEvidence):''}`));
       if (!result.rows?.length) box.append(el("p", t("暂无可核验条目，请先完成一次同步。")));
     } catch (error) { setText(box, t(error.localizedMessage ?? error.message)); }
     finally { verifying = false; $("verify-results").disabled = false; }
@@ -68,7 +68,7 @@
           };
           cancel.className='secondary';confirm.className='primary';dialog.append(status, actions(cancel,confirm)); dialog.addEventListener("close", () => dialog.remove(), { once:true }); document.body.append(dialog); dialog.showModal();
         };
-        row.append(actions(button,remove)); box.append(row);
+        remove.disabled=!!backup.retained;row.append(DucoroBackupFiles.details('state',backup,()=>$("list-backups").onclick()),actions(button,remove)); box.append(row);
       }
     } catch (error) { setText(box, t(error.localizedMessage ?? error.message)); }
   };

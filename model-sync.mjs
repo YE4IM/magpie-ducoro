@@ -72,14 +72,14 @@ export function createModelSync({ operations, opts, run, getState, save, request
     }
     let complete = true
     await mapLimit(bots, 4, async bot => {
-      const operation = operations ? await operations.begin('gateway',bot.id,'model',{connection,model:modelTarget(opts,bot.id,target),guard:opts.modelGuards?.[bot.id]},['connection']) : true
-      if (!operation) return
+      let operation
+      const desired = {connection,model:modelTarget(opts,bot.id,target),guard:opts.modelGuards?.[bot.id]}
       try {
         // The roster is only an index. Re-read the full preference so an
         // operator's recent route/control changes are not replaced by old data.
         const current = record(await call(['agent', 'get', bot.id]))
         if (current?.id !== bot.id) throw Error('unrecognized Ducoro Bot record')
-        if (!eligible(current)) { await operations?.finish(operation); return }
+        if (!eligible(current)) return
         const preference = current.modelPreference
         const model = modelTarget(opts,bot.id,target)
         if (models.length && !models.includes(model)) throw Error('assigned model unavailable; existing preference retained')
@@ -88,7 +88,10 @@ export function createModelSync({ operations, opts, run, getState, save, request
         const info = infos.find(info => info.id === model)
         if (!info) throw Error('effective model capabilities unavailable; Bot sync deferred')
         const next = compatiblePreference(preference, model, info)
-        if (JSON.stringify(next) === JSON.stringify(preference)) { await operations?.finish(operation); return }
+        const unchanged = JSON.stringify(next) === JSON.stringify(preference)
+        operation = operations ? await operations.begin('gateway',bot.id,'model',desired,['connection'],unchanged) : true
+        if (!operation) return
+        if (unchanged) { await operations?.finish(operation); return }
         await call(['agent', 'update', bot.id, '--patch', JSON.stringify({ modelPreference: next })])
         const verified = record(await call(['agent', 'get', bot.id]))
         if (verified?.id !== bot.id || !verified.modelPreference
@@ -102,7 +105,8 @@ export function createModelSync({ operations, opts, run, getState, save, request
         await operations?.finish(operation)
         log(`Bot ${bot.id} model synchronized: ${preference.model} -> ${model}${preference.thinkingLevel && !next.thinkingLevel ? ' (unsupported thinking override cleared)' : ''}`)
       } catch (error) {
-        await operations?.finish(operation,false)
+        operation??=await operations?.begin('gateway',bot.id,'model',desired,['connection']);
+        await operations?.finish(operation,false,[],error)
         complete = false
         log(`Bot ${bot.id} model sync deferred: ${error.message}`)
         requestRetry('bot-model-sync')

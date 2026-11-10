@@ -1,5 +1,8 @@
+import {readOperationControls,setOperationControl} from './operation-controls.mjs';
+import { inspectSyncLock } from "./lock-diagnostics.mjs";
+import { acquireSyncLock } from "./sync-lock.mjs";
 import { previewLocalRecords, cleanLocalRecords } from "./local-records.mjs";
-import { openBackupDirectory, previewBackupImport, importBackupFile, previewBackupDeletion, clearBackupFiles, withBackupLock } from './backup-files.mjs';
+import { backupFileAction, openBackupDirectory, previewBackupImport, importBackupFile, previewBackupDeletion, clearBackupFiles, withBackupLock } from './backup-files.mjs';
 import { createCheckpoint, checkpoints, rollbackDraft, inspectDrift, revision, projectOptions } from "./control-center.mjs";
 import "./ui/plans.js";
 import "./ui/i18n.js";
@@ -8,7 +11,7 @@ const { translate, format, localizeReport, languageFor, message } =
 // Loopback page service. Inventory is projected explicitly: no raw credentials,
 // account records, endpoint URLs, server arguments or skill bodies reach HTML.
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -193,6 +196,7 @@ export async function createPageService({
     return result.json;
   };
   let verificationJob = null;
+  let inventorySnapshot = null;
   let capabilityFlight = null;
   let capabilityCache = null,
     capabilityTime = 0;
@@ -254,22 +258,37 @@ export async function createPageService({
           res.setHeader("Access-Control-Allow-Methods", "GET, POST");
           res.setHeader(
             "Access-Control-Allow-Headers",
-            "X-Ducoro-Token, X-Ducoro-Language, Content-Type",
+            "X-Ducoro-Token, X-Ducoro-Language, X-Ducoro-Inventory, Content-Type",
           );
           return reply(204, "", "text/plain");
         }
         if (req.headers["x-ducoro-token"] !== token)
           return reply(403, { error: "页面连接已更新，请重新读取页面" });
+        if(path==='api/lock' && req.method==='GET')return reply(200,await inspectSyncLock(stateDir));
+        if(path==='api/draft' && ['GET','POST'].includes(req.method)) {
+          const file=join(stateDir,'page-draft.json');
+          if(req.method==='GET')return reply(200,await jsonFile(file).catch(()=>({})));
+          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>1024*1024)return reply(413,{error:'请求过大'});}
+          const value=JSON.parse(body);
+          return reply(200,await withBackupLock(stateDir,async()=>{
+            const previous=await jsonFile(file).catch(e=>{if(e.code==='ENOENT')return {};throw e;});
+            if((value.revision??null)!==(previous.revision??null))return {conflict:true,revision:previous.revision};
+            if(value.clear){const revision=randomBytes(16).toString('hex');await writeFile(file+'.tmp',JSON.stringify({revision}),{mode:0o600});await rename(file+'.tmp',file);return {revision};}
+            let editor=null;
+            if(value.editor){const raw=value.editor;if(!Array.isArray(raw.values)||raw.values.length!==5||raw.values.some(x=>typeof x!=='string')||typeof raw.selected!=='string'||typeof raw.dirty!=='boolean'||raw.targets!==null&&(!Array.isArray(raw.targets)||raw.targets.some(id=>!/^agt-[A-Za-z0-9-]+$/.test(id))))throw Error('Invalid draft editor');editor={selected:raw.selected,dirty:raw.dirty,targets:raw.targets,values:raw.values};}
+            const data={base:projectOptions(value.base??{}),options:projectOptions(value.options??{}),editor,revision:randomBytes(16).toString('hex'),at:Date.now()};
+            const temporary=file+'.tmp';await writeFile(temporary,JSON.stringify(data),{mode:0o600});await rename(temporary,file);return {saved:true,revision:data.revision};
+          }));
+        }
         if ((req.method === 'GET' && path === 'api/local-records') || (req.method === 'POST' && path === 'api/local-records/clean')) {
           let body='';
           if(req.method==='POST')for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'请求过大'});}
-          const lock=join(stateDir,'sync.lock');
-          try {await mkdir(lock);}catch(e){if(e.code==='EEXIST')return reply(409,{error:'正在同步，请完成后再清理本地记录。'});throw e;}
+          const release=await acquireSyncLock(stateDir);
+          if(!release)return reply(409,{error:'正在同步，请完成后再清理本地记录。'});
           let result, failure;
           try {
-            await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid}));
             result=req.method==='GET'?await previewLocalRecords(stateDir):await cleanLocalRecords(stateDir,JSON.parse(body).token);
-          }catch(error){failure=error;}finally{await rm(lock,{recursive:true,force:true});}
+          }catch(error){failure=error;}finally{await release();}
           if(failure) {
             // Only authored public messages may cross the page API boundary.
             const publicErrors={
@@ -285,7 +304,7 @@ export async function createPageService({
           if(result.groups) result={...result,groups:result.groups.map(key=>translate(key,language)),groupMessages:result.groups.map(key=>message(key))};
           return reply(200,result);
         }
-        const backupAction = /^api\/backup-files\/(state|checkpoints)\/(import-preview|import|clear-preview|clear|open-directory|create)$/.exec(path);
+        const backupAction = /^api\/backup-files\/(state|checkpoints)\/(import-preview|import|clear-preview|clear|open-directory|create|metadata|export)$/.exec(path);
         if (backupAction && req.method === 'POST') {
           const [,kind,action]=backupAction;
           const chunks=[];let bytes=0;
@@ -297,6 +316,7 @@ export async function createPageService({
             if(action==='open-directory')return reply(200,await openBackupDirectory(stateDir,kind));
             if(action==='import-preview')return reply(200,previewBackupImport(kind,value.content));
             const result=await withBackupLock(stateDir,()=>{
+              if(['metadata','export'].includes(action))return backupFileAction(stateDir,kind,value.id,action,value);
               if(action==='create')return kind==='state'?createStateBackup(join(stateDir,'state.json')):createCheckpoint(stateDir,options,options,true);
               if(action==='import')return importBackupFile(stateDir,kind,value.content,value.token);
               if(action==='clear-preview')return previewBackupDeletion(stateDir,kind);
@@ -371,7 +391,9 @@ export async function createPageService({
             }),
             getCapabilities(),
           ]);
-          return reply(200, { ...data, capabilities });
+          const inventoryToken = randomBytes(16).toString('hex');
+          inventorySnapshot = {token:inventoryToken, data:structuredClone(data), language, slug:options.connectionSlug, at:Date.now()};
+          return reply(200, { ...data, capabilities, inventoryToken });
         }
         if (path === "api/verification" && ["GET", "POST"].includes(req.method)) {
           const loaded = await readManagedState(join(stateDir, "state.json"));
@@ -389,12 +411,12 @@ export async function createPageService({
             return reply(200,preview);
           }
           // Share the writer lock with normal synchronization.
-          const lock=join(stateDir,"sync.lock");
-          try {await mkdir(lock);}catch {return reply(409,{error:"正在同步，请完成后再操作备份。"});}
+          const release=await acquireSyncLock(stateDir);
+          if(!release)return reply(409,{error:"正在同步，请完成后再操作备份。"});
           try {
             if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
             await restoreStateBackup(file,id,checksum);
-          } finally {await rm(lock,{recursive:true,force:true});}
+          } finally {await release();}
           return reply(200,{restored:true});
         }
         if (req.method === "GET" && path === "api/report")
@@ -429,6 +451,24 @@ export async function createPageService({
             200,
             policyRows(await call(["agent", "connector", "list", id])),
           );
+        }
+        if(path==='api/operations' && req.method==='GET') {
+          const loaded=await readManagedState(join(stateDir,'state.json')),controls=await readOperationControls(stateDir);
+          return reply(200,{operations:Object.entries(loaded.state.operations??{}).filter(([,row])=>row.status!=='completed').map(([id,row])=>({id,feature:row.feature,target:row.target,resource:row.resource,status:row.status,attempts:row.attempts,failureClass:row.failureClass??'temporary',paused:!!controls[id]?.paused}))});
+        }
+        if(path==='api/operations' && req.method==='POST') {
+          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'Request too large'});}
+          const value=JSON.parse(body);
+          if(!/^[a-f0-9]{64}$/.test(value.id??'')||!['retry','pause','resume'].includes(value.action))return reply(422,{error:'Invalid operation control'});
+          let operationFeature;
+          try {await withBackupLock(stateDir,async()=>{
+            const loaded=await readManagedState(join(stateDir,'state.json'));
+            if(!loaded.state.operations?.[value.id])throw Object.assign(Error('Operation changed; refresh the list'),{backupStatus:409});
+            operationFeature=loaded.state.operations[value.id].feature;
+            await setOperationControl(stateDir,value.id,value.action==='pause');
+          });}catch(error){if(error.backupStatus)return reply(error.backupStatus,{error:error.message});throw error;}
+          if(value.action!=='pause')trigger('page-operation:'+value.id+':'+operationFeature,0);
+          return reply(200,{queued:value.action!=='pause'});
         }
         if (req.method === 'POST' && path === 'api/retry-failed') {
           trigger('page-retry-failed',0); return reply(200,{queued:true});
@@ -468,7 +508,8 @@ export async function createPageService({
               AbortSignal.timeout(40000),
             ]);
             const [data, capabilities] = await Promise.all([
-              inventory({ options: next, paths, run, language, signal }),
+              inventorySnapshot && req.headers['x-ducoro-inventory'] === inventorySnapshot.token && Date.now()-inventorySnapshot.at < 15000 && inventorySnapshot.language===language && inventorySnapshot.slug===next.connectionSlug
+                ? Promise.resolve(structuredClone(inventorySnapshot.data)) : inventory({ options: next, paths, run, language, signal }),
               getCapabilities(),
             ]);
             if (signal.aborted)
@@ -504,6 +545,7 @@ export async function createPageService({
           "style.css",
           "app.js",
           "model.js",
+          "defaults.js",
           "service-bridge.js",
           "resources.js",
           "reliability.js",

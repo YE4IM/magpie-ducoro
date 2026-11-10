@@ -1,3 +1,4 @@
+import {backupMetadata,removeBackupMetadata,pruneBackups} from './backup-metadata.mjs';
 import { readFile, open, mkdir, rename, unlink, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -16,7 +17,16 @@ export function validateState(raw) {
       { code: "state-version" },
     );
   if(raw._journalSeq !== undefined && (!Number.isSafeInteger(raw._journalSeq)||raw._journalSeq<0))throw Error('管理记录序号无效');
-  if(raw.operations !== undefined && (!object(raw.operations)||Object.values(raw.operations).some(row=>!object(row)||!['running','failed','completed'].includes(row.status))))throw Error('操作恢复记录损坏');
+  if (raw.operations !== undefined && (!object(raw.operations) || Object.values(raw.operations).some(row =>
+    !object(row) || !['running','failed','completed'].includes(row.status) ||
+    !['feature','target','resource'].every(key => typeof row[key] === 'string' && row[key].length > 0) ||
+    typeof row.revision !== 'string' || !/^[a-f0-9]{64}$/.test(row.revision) ||
+    (row.failureClass!==undefined&&!['temporary','permission','conflict'].includes(row.failureClass)) ||
+    !Number.isSafeInteger(row.attempts) || row.attempts < 1 ||
+    typeof row.updatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.updatedAt) ||
+    !Number.isFinite(Date.parse(row.updatedAt)) ||
+    !Array.isArray(row.dependencies) || !row.dependencies.every(value => typeof value === 'string')
+  ))) throw Error('操作恢复记录损坏');
   for (const key of ["mcp", "skills", "accountConnectors"])
     if (raw[key] !== undefined && !object(raw[key]))
       throw Error("管理记录格式损坏");
@@ -202,7 +212,7 @@ async function compact(file,state,keepBackup=true) {
     await atomic(join(dir,digest(previous)+'.json'),previous);
     const entries=await Promise.all((await readdir(dir)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(async n=>({n,time:(await stat(join(dir,n))).mtimeMs})));
     entries.sort((a,b)=>b.time-a.time);
-    for(const item of entries.slice(5))await unlink(join(dir,item.n));
+    await pruneBackups(dir,entries.map(item=>item.n.slice(0,-5)),5);
   }
   await atomic(file,body);
   await atomic(file+'.journal','');
@@ -281,7 +291,7 @@ export function createStateBackup(file) {
     const dir=join(dirname(file),'state-backups');await mkdir(dir,{recursive:true,mode:0o700});
     const id=digest(body);await atomic(join(dir,id+'.json'),body);
     const entries=await Promise.all((await readdir(dir)).filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(async n=>({n,time:(await stat(join(dir,n))).mtimeMs})));
-    entries.sort((a,b)=>b.time-a.time);for(const item of entries.slice(5))await unlink(join(dir,item.n));
+    entries.sort((a,b)=>b.time-a.time);await pruneBackups(dir,entries.map(item=>item.n.slice(0,-5)),5);
     return {id};
   });
 }
@@ -295,7 +305,7 @@ export async function stateBackups(file) {
   const dir=join(dirname(file),'state-backups'), result=[];
   for(const name of await readdir(dir).catch(e=>{if(e.code==='ENOENT')return [];throw e;})) {
     if(!/^[a-f0-9]{64}\.json$/.test(name))continue;
-    try {const body=await readFile(join(dir,name),'utf8');const {createHash}=await import('node:crypto');if(createHash('sha256').update(body).digest('hex')!==name.slice(0,-5))continue;const state=validateState(JSON.parse(body));result.push({id:name.slice(0,-5),checksum:name.slice(0,-5),createdAt:(await stat(join(dir,name))).mtime.toISOString(),counts:counts(state)});}catch{}
+    try {const body=await readFile(join(dir,name),'utf8');const {createHash}=await import('node:crypto');if(createHash('sha256').update(body).digest('hex')!==name.slice(0,-5))continue;const state=validateState(JSON.parse(body));result.push({id:name.slice(0,-5),checksum:name.slice(0,-5),createdAt:(await stat(join(dir,name))).mtime.toISOString(),counts:counts(state),...await backupMetadata(dir,name.slice(0,-5))});}catch{}
   }
   return result.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
@@ -331,6 +341,8 @@ export async function deleteStateBackup(file, id, checksum) {
   const { unlink } = await import('node:fs/promises');
   try {
     await previewStateBackup(file, id);
+    if((await backupMetadata(join(dirname(file),'state-backups'),id)).retained)throw Error('Unmark retention before deleting this backup');
+    await removeBackupMetadata(join(dirname(file),'state-backups'),id);
     await unlink(join(dirname(file), 'state-backups', id + '.json'));
     return { deleted: true };
   } catch (error) {

@@ -1,36 +1,44 @@
-# Ducoro 0.4.3
+# Ducoro 0.4.5
 
-Version 0.4.3 focuses on sync efficiency, reliability, and backup management. Shared skill caching, deduplicated reads, incremental saves, and per-target retries reduce repeated work and disk writes when syncing multiple Bots, while stronger cancellation, timeout handling, and recovery improve resilience. A centralized backup page brings together management-record backups and configuration checkpoints, with external backup import, restore previews, selective configuration rollback, and local record cleanup. This release also refines sync diagnostics, English and Chinese interfaces, and narrow-screen layouts, and fixes diagnostic state being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
-
-## Import and clear local backups
-
-Both **Valid backups and restore preview** and **Configuration checkpoints and selective restore** in Sync diagnostics now provide **Import external file** and **Clear local backups**.
-
-State imports accept complete v1/v2 state snapshots, including existing backup JSON files. A journal alone is not a complete snapshot. Checkpoint imports accept version 1 records containing `id`, `createdAt`, `before` and `after`; changes are recalculated and a new local identity prevents overwriting an existing checkpoint. Files are limited to 8 MiB.
-
-Review and confirm the import to add a backup to its local list. Apply it separately through state restore preview or selected checkpoint entries staged into a draft. Importing does not apply settings or modify Bots.
-
-Each clear action previews the number and size of files in that collection and asks for confirmation. It retains current state, journals, recovery originals, skill caches and the other backup collection. A changed file list requires a new preview. Action rows now keep consistent spacing and wrap on narrow screens in both languages.
+0.4.5 improves sync efficiency, protects unfinished edits and strengthens recovery. It reduces repeated reads, unnecessary journal writes and multi-Bot refresh overhead, fixes misleading previews and cold-start failures, and aligns instruction and subagent previews with actual synchronization. Complete plan drafts save automatically, with protection against conflicting edits across pages and undo for bulk changes. Individual Bot resources can be retried, paused or resumed, supported by clearer lock diagnostics, content digests and permission verification. Backups gain names, notes, retention and export, while selective rollback includes related configuration dependencies. Backup import validation and MCP update compatibility are also improved. Chinese and English interfaces preserve drafts and selections, and existing settings and management records carry forward without reconfiguration.
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro. Manage assignments for individual Bots from the plugin page.
 
 ## Installation
 
-Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.3.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
+Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.5.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
 Replace the previous plugin path or package when upgrading. Keep existing management records and assignments; do not enable two versions simultaneously.
 
-## What's new in 0.4.3
+## What's new in 0.4.5
+
+- **Plan drafts:** unfinished plan edits persist automatically with visible save status. Version checks prevent conflicting writes across open pages, and staged bulk changes can be undone.
+- **Per-resource recovery:** failures are listed by Bot and resource, with retry, pause and resume per item. Temporary failures back off automatically; permission and configuration conflicts wait for intervention.
+- **Lock diagnostics and content digests:** inspect lock ownership, age and recovery tokens; guarded offline recovery requires every plugin host to be stopped. Readable MCP, skill and subagent bodies are compared by digest, including the private import permission policy for skills; missing evidence stays explicitly unverified.
+- **Backup management:** backups gain names, notes, retention flags and JSON export. Retained files survive automatic pruning, bulk clearing and local-record cleanup. Import validation for recovery records is strengthened, and selective rollback includes related plan, binding and scope changes before staging for preview.
+- **Efficiency:** deduplicated reads, no journal writes for unchanged settings, and reused Bot cards and controls that keep expansion, selections and focus. Manual and pre-save previews re-read inventory; instruction and subagent previews now match actual synchronization targets.
+- **English and Chinese:** refreshes and language changes preserve plan target selections, drafts and expanded states. Existing settings and management records carry forward without reconfiguration.
+
+Stop the old plugin host before loading 0.4.5; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, stop the 0.4.5 host, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge its journal under the shared lock. After an interrupted run, recover with 0.4.5 first. Do not manually delete an uncompacted journal.
+
+## Features introduced in 0.4.3
+
+### Import and clear local backups
+
+Both **Valid backups and restore preview** and **Configuration checkpoints and selective restore** in Sync diagnostics provide **Import external file** and **Clear local backups**.
+
+State imports accept complete v1/v2 state snapshots, including existing backup JSON files. A journal alone is not a complete snapshot. Checkpoint imports accept version 1 records containing `id`, `createdAt`, `before` and `after`; changes are recalculated and a new local identity prevents overwriting an existing checkpoint. Files are limited to 8 MiB.
+
+Review and confirm the import to add a backup to its local list. Apply it separately through state restore preview or selected checkpoint entries staged into a draft. Importing does not apply settings or modify Bots.
+
+Each clear action previews the number and size of files in that collection and asks for confirmation. It retains current state, journals, recovery originals, skill caches and the other backup collection. A changed file list requires a new preview. Action rows keep consistent spacing and wrap on narrow screens in both languages.
 
 - **Shared skill artifacts:** prepare and validate each skill name/content version once, then reuse it for authorized Bots. Each target retains its own permission checks, import and replacement recovery.
-- **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records or at 1 MiB. Small changes remain journaled across sync rounds; explicit maintenance can also compact them. Keep up to five state backups.
+- **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records or at 1 MiB. Small changes remain journaled across sync rounds; explicit maintenance can also compact them. Keep the latest five unretained state backups, plus explicitly retained backups.
 - **Operation-level retries:** record each target's desired revision, dependencies, status and attempt count. Automatic retries schedule affected features and skip completed operations at the same revision. Failed or interrupted operations reconcile actual state before recovery. Full manual and periodic syncs still check external changes.
 - **Local record cleanup:** open **Sync diagnostics → Local record management → Clean up local records**. Review the counts and storage estimate, then confirm. Cleanup removes completed operation history, old state backups and unused skill caches, and compacts incremental records. It retains current ownership, permission recovery data, unfinished operations and skill versions in use. Sync and cleanup share a lock; an outdated preview must be refreshed.
-- **Bounded retention:** retain up to 500 completed operation records and reclaim unused skill caches older than seven days after sync. Configuration checkpoints retain their existing 20-item limit and are not deleted by this cleanup action.
+- **Bounded retention:** retain up to 500 completed operation records and reclaim unused skill caches older than seven days after sync. Configuration checkpoints retain the latest 20 unretained records and are not deleted by this cleanup action.
 - **English and Chinese:** cleanup previews, confirmations, results and errors follow the host language. Switching languages preserves open dialogs and preview values. Bot names, resource names and technical identifiers are unchanged.
-
-Stop the old plugin host before loading 0.4.3; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, stop the 0.4.3 host, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge its journal under the shared lock. After an interrupted run, recover with 0.4.3 first. Do not manually delete an uncompacted journal.
-
 
 ## Features introduced in 0.4.2
 
@@ -125,3 +133,19 @@ Incremental feature scheduling, bounded file caching and read deduplication redu
 Checkpoints capture desired plugin settings, not skill bodies or running sessions. Model restoration rechecks the reviewed configuration before writing. Unsupported content readback remains unverified.
 
 The new plan, progress, drift and checkpoint controls are localized in English and Chinese, including live statuses, dates, errors and accessibility labels. Switching the host language retains drafts and original resource names. Verification responses localize messages while preserving structured status codes.
+
+## Drafts, lock recovery and source checks
+
+Persistent drafts use the authenticated local service and are restored only against the same settings baseline. Stop every plugin host before lock recovery, inspect ownership again and use the latest recovery token.
+
+From the source archive, install development dependencies and run static checks. Release folders omit test scripts, screenshots and acceptance-work records.
+
+```sh
+npm ci
+npm run check
+npm run lock:inspect -- /absolute/path/to/ducoro-bridge
+# After stopping every host and inspecting again:
+npm run lock:inspect -- /absolute/path/to/ducoro-bridge TOKEN --all-hosts-stopped
+```
+
+Account tool-policy writes require a connected Ducoro account. Configuration verification does not prove that running sessions loaded the resources. When the current CLI cannot clear a nonempty MCP args/env/headers list or safely change transport, the plugin retains the definition and reports a conflict requiring explicit re-creation.

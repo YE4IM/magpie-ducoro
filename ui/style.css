@@ -211,3 +211,10 @@ html.language-pending body { visibility: hidden; }
   .save-bar > span { max-width:100%; }
   .save-bar > div { flex-wrap:wrap; }
 }
+
+/* Keep native scroll-to-control behavior clear of the sticky save actions. */
+html { scroll-padding-bottom:160px; }
+button,input,textarea,select,summary { scroll-margin-block:20px 160px; }
+.backup-row > div:not(.action-row) { flex:1 1 100%; }
+
+.backup-details input:not([type=checkbox]),.backup-details textarea { width:100%; }

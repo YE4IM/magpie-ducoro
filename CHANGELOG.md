@@ -1,3 +1,24 @@
+# 更新记录 / Changelog
+
+## 0.4.5 — 2026-11-11
+
+0.4.5 聚焦同步效率、编辑保护与异常恢复。新版减少重复读取、无变化日志写入和多 Bot 刷新开销，修复预览误报与冷启动问题，并统一指令、子代理的预览与实际同步目标。方案草稿支持完整自动保存、多页面防覆盖和批量修改撤销，失败操作可按 Bot、按资源重试、暂停或恢复。同步锁诊断、内容摘要与权限核验让问题更易定位；备份新增名称、备注、保留和导出，选择性回退自动关联配置依赖，同时完善备份导入校验与 MCP 更新兼容性。中英文界面保留草稿与选择状态，升级沿用现有设置和管理记录，无需重新配置。
+
+0.4.5 improves sync efficiency, protects unfinished edits and strengthens recovery. It reduces repeated reads, unnecessary journal writes and multi-Bot refresh overhead, fixes misleading previews and cold-start failures, and aligns instruction and subagent previews with actual synchronization. Complete plan drafts save automatically, with protection against conflicting edits across pages and undo for bulk changes. Individual Bot resources can be retried, paused or resumed, supported by clearer lock diagnostics, content digests and permission verification. Backups gain names, notes, retention and export, while selective rollback includes related configuration dependencies. Backup import validation and MCP update compatibility are also improved. Chinese and English interfaces preserve drafts and selections, and existing settings and management records carry forward without reconfiguration.
+
+- 合并重复读取，减少无变化的日志写入；复用 Bot 卡片及未变化的控件，保留展开状态、选择与焦点。
+- 完整保存尚未提交的方案编辑，显示草稿保存状态，使用版本检查防止多页面覆盖，并支持批量修改撤销。
+- 按 Bot 和资源查看失败项，分别重试、暂停和恢复；临时失败退避，权限与配置冲突等待处理。
+- 提供持锁进程、锁龄与恢复令牌诊断；停止全部宿主后可执行受保护的离线恢复。
+- 在可读取范围比较连接器、技能和子代理正文摘要；技能同时核对私有导入权限，证据不足时显示待核实与下一步。
+- 备份支持名称、备注、保留和 JSON 导出；保留项不受自动裁剪、批量删除或本地记录清理影响。
+- 配置回退自动关联方案定义、继承关系和作用域变更，结果先进入草稿，再预览保存。
+- 诊断进度请求去重，后台暂停、空闲降频；修复冷启动预览和 MCP 空列表参数更新兼容问题。
+- 修复连接器摘要不一致造成的预览误报，统一指令、子代理的预览与实际同步目标选择。
+- 自动预览短时复用本次清单，手动及保存前预览重新读取；正常完整扫描采用五分钟间隔，监听降级时保留快速检查。
+- 备份导入加强操作恢复记录的时间、摘要、尝试次数与依赖校验，统一资源指纹、配置默认值与同步锁。
+- 刷新与语言切换保留方案目标勾选、草稿和展开状态。
+
 ## 0.4.3 — 2026-11-08
 
 0.4.3 聚焦同步效率、运行稳定性与备份管理。通过共享技能缓存、合并重复读取、增量保存和按目标重试，减少多 Bot 同步中的重复处理与磁盘写入，并完善任务取消、命令超时及异常恢复。新版集中提供管理记录备份与配置检查点，支持外部备份导入、恢复预览、选择性配置回退和本地记录清理；同时优化同步诊断、中英文界面与窄屏布局，修复增量同步时诊断状态丢失等问题。升级沿用现有设置和管理记录，无需重新配置。
