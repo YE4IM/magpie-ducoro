@@ -41,7 +41,13 @@
     choices.value=selected;
     targets.replaceChildren();for(const bot of DucoroResources.bots??[]){const row=el('label'),check=el('input');check.type='checkbox';check.value=bot.id;check.checked=targetDraft ? targetDraft.has(bot.id) : !!selected&&draft.botPlans?.[bot.id]===selected;check.onchange=()=>{targetDraft=new Set([...targets.querySelectorAll('input:checked')].map(x=>x.value));editorChanged();};row.append(check,el('span',bot.name));targets.append(row);}
   }
-  choices.onchange=()=>{if(editorDirty&&!confirm(String(t('放弃尚未提交的方案编辑？')))){choices.value=selected;return;}editorDirty=false;selected=choices.value;targetDraft=null;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';refreshPlans();};
+  const discardEditor=()=>new Promise(resolve=>{
+    const dialog=el('dialog'),cancel=el('button',t('取消')),accept=el('button',t('确认'));
+    cancel.type=accept.type='button';cancel.onclick=()=>dialog.close();accept.onclick=()=>dialog.close('discard');
+    dialog.append(el('p',t('放弃尚未提交的方案编辑？')),actions(cancel,accept));
+    dialog.addEventListener('close',()=>{const accepted=dialog.returnValue==='discard';dialog.remove();resolve(accepted);},{once:true});document.body.append(dialog);dialog.showModal();cancel.focus();
+  });
+  choices.onchange=async()=>{const next=choices.value;choices.value=selected;if(editorDirty&&!await discardEditor())return;editorDirty=false;selected=next;targetDraft=null;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';refreshPlans();};
   plans.append(actions(button(t('更新方案草稿'),()=>{
     if(!name.input.value.trim())throw DucoroI18n.error(t('请填写方案名称'));
     const draft=DucoroWorkspace.collect(),id=selected||`plan-${crypto.randomUUID().slice(0,8)}`;
@@ -64,10 +70,7 @@
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){nextPoll=0;if(!$('diagnostics').hidden)void progress();}});
   document.addEventListener('ducoro-saving',()=>{void progress();});
 
-  const operationsCard=card('diagnostics',t('单项失败与暂停')),operationsBox=el('div');
-  const failureLabels={temporary:t('临时故障'),permission:t('权限不足'),conflict:t('配置冲突')};
-  const refreshOperations=async()=>{const result=await ducoroApi('operations');operationsBox.replaceChildren();for(const row of result.operations){const item=el('div');item.append(el('p',`${row.target} / ${row.resource} · ${failureLabels[row.failureClass]??row.failureClass} · ${row.attempts} · ${row.paused?t('已暂停'):statusLabel(row.status)}`));for(const [label,action] of [[t('重试此项'),'retry'],[row.paused?t('恢复此项'):t('暂停此项'),row.paused?'resume':'pause']])item.append(button(label,async()=>{await ducoroApi('operations',{id:row.id,action});await refreshOperations();}));operationsBox.append(item);}};
-  operationsCard.append(button(t('查看失败项'),refreshOperations),operationsBox);
+  globalThis.DucoroTaskCenter.mount({card,el,button,actions});
   const drift=card('diagnostics',t('配置漂移中心')),driftBox=el('div');
   drift.append(el('p',t('比较期望配置、当前配置和上次应用记录。内容证据不足的资源保留待核实。')));
   drift.append(button(t('检查配置漂移'),async()=>{

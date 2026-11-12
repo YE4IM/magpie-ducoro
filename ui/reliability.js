@@ -9,22 +9,23 @@
     verifying = true; $("verify-results").disabled = true;
     const box = $("verification-results"); setText(box, t("正在读取配置并核验…"));
     try {
-      let result = await ducoroApi("verification-start", {});
-      const deadline = Date.now() + 35000;
-      while(result.running && Date.now() < deadline) {
-        box.replaceChildren(...(result.rows ?? []).map(row => el('p', t`${row.target} · ${DucoroI18n.statusLabel(row.status)}`)));
-        await new Promise(resolve => setTimeout(resolve, 500));
-        result = await ducoroApi('verification-progress');
-      }
+      const result = await globalThis.DucoroVerificationTracker.track({api:ducoroApi,start:force,onUpdate:partial=>{
+        if(!partial.running)return;
+        box.replaceChildren(el('p',t(partial.connectionError?'核验连接暂时中断，正在重新连接…':partial.background?'仍在后台核验，将继续跟踪；已完成的条目如下。':'正在读取配置并核验…')),...(partial.rows??[]).map(row=>el('p',t`${row.target} · ${DucoroI18n.statusLabel(row.status)}`)));
+      }});
       if(result.error) throw Error(result.error);
-      box.replaceChildren(el("p", t`核验时间：${result.updatedAt ? dateTime(result.updatedAt) : t("尚无记录")} · 运行中会话加载状态：待核实`));
-      for (const row of result.rows ?? []) box.append(el("p", t`${row.target} · ${{connection:t("网关连接"),models:t("模型"),mcp:t("连接器"),skills:t("技能"),instructions:t("指令"),subagents:t("子代理"),accountConnectors:t("账户权限")}[row.feature] ?? row.feature} · ${{verified:t("已写入并核验"),failed:t("核验失败"),unknown:t("待核实"),skipped:t("已跳过")}[row.status] ?? t("待核实")}：${t(row.message ?? "")}${row.digest?' · '+row.digest:''}${row.missingEvidence?' · '+t(row.missingEvidence):''}${row.nextStep?' · '+t(row.nextStep):''}${row.permissionEvidence?' · '+t(row.permissionEvidence):''}`));
+      box.replaceChildren(el("p", t`核验时间：${result.updatedAt ? dateTime(result.updatedAt) : t("尚无记录")} · ${t(result.completion==='partial'?'部分完成，仍有待核实条目':'核验已完成')}`));
+      box.append(el('p',t('已保存：以 Magpie 设置为准；已写入：以同步任务为准；已核验：以逐项读回为准；会话生效：待核实。')),el('p',t('请在 Ducoro 新建会话或开始下一轮对话，检查模型名称、可用工具、技能和子代理列表；指令请用一条可辨识规则验证。')));
+      for (const row of result.rows ?? []) { box.append(el("p", t`${row.target} · ${{connection:t("网关连接"),models:t("模型"),mcp:t("连接器"),skills:t("技能"),instructions:t("指令"),subagents:t("子代理"),accountConnectors:t("账户权限")}[row.feature] ?? row.feature} · ${{verified:t("已写入并核验"),failed:t("核验失败"),unknown:t("待核实"),skipped:t("已跳过")}[row.status] ?? t("待核实")}：${t(row.message ?? "")}${row.digest?' · '+row.digest:''}${row.missingEvidence?' · '+t(row.missingEvidence):''}${row.nextStep?' · '+t(row.nextStep):''}${row.permissionEvidence?' · '+t(row.permissionEvidence):''}`));
+        box.append(el('p',t`保存：${t(row.stages?.saved==='confirmed'?'已保存':'待核实')} · 写入：${t(row.stages?.written==='confirmed'?'已确认':'待核实')} · 核验：${DucoroI18n.statusLabel(row.status)} · 会话生效：${t('待核实')}`));
+      }
       if (!result.rows?.length) box.append(el("p", t("暂无可核验条目，请先完成一次同步。")));
     } catch (error) { setText(box, t(error.localizedMessage ?? error.message)); }
     finally { verifying = false; $("verify-results").disabled = false; }
   }
+  void verify(false);
   $("verify-results").onclick = () => verify(true);
-  document.addEventListener("ducoro-report", () => verify());
+  document.addEventListener("ducoro-report", () => verify(true));
   $("list-backups").onclick = async () => {
     const box = $("backup-results"); setText(box, t("正在校验备份…"));
     try {

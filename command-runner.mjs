@@ -74,6 +74,7 @@ export function createCommandRunner({
       let child;
       try {
         child = nodeSpawn(opts.cli, full, {
+          detached: process.platform !== "win32",
           stdio: [stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
         });
       } catch (e) {
@@ -92,11 +93,13 @@ export function createCommandRunner({
       let outputLimited = false;
       const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
       let aborted = false;
+      let termination = null, cleanupTimer, spawnCode;
       let done = false;
       const finish = (code) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        clearTimeout(cleanupTimer);
         child.stdout?.destroy();
         child.stderr?.destroy();
         child.stdin?.destroy();
@@ -106,9 +109,9 @@ export function createCommandRunner({
           reject(
             signal?.aborted
               ? Object.assign(new Error("request cancelled"), {
-                  name: "AbortError",
+                  name: "AbortError", code: "ABORT_ERR", outcomeUnknown: true,
                 })
-              : gatewayAbortError(),
+              : Object.assign(gatewayAbortError(), {outcomeUnknown:true, code:"ABORT_ERR"}),
           );
           return;
         }
@@ -118,23 +121,25 @@ export function createCommandRunner({
         try {
           if (!outputLimited) json = JSON.parse(stdout.trim());
         } catch {}
-        resolve({ ok: code === 0, code, stdout, stderr, json });
+        resolve({ ok: code === 0 && !termination, code, stdout, stderr, json,
+          ...(termination ? {errorCode: termination, outcomeUnknown: true} : spawnCode ? {errorCode: spawnCode} : {}) });
       };
-      const onAbort = () => {
-        aborted = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-        finish(-1);
-      };
-      const stop = (message) => {
-        if (done) return;
+      const stop = (message, errorCode = "ETIMEDOUT") => {
+        if (done || termination) return;
+        termination = errorCode;
         stderr = message + "\n" + stderr;
-        try { child.kill("SIGKILL"); } catch {}
-        // Descendants may retain stdout/stderr after the direct child exits.
-        // Settle on our deadline and close local pipes without waiting for close.
-        finish(-1);
+        // Each CLI owns a process group, including descendants retaining pipes.
+        // Keep the caller's mutation lock until close or a bounded cleanup deadline.
+        if (process.platform === "win32" && child.pid) {
+          const killer = nodeSpawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {stdio:"ignore"});
+          killer.on("error", () => { try { child.kill("SIGKILL"); } catch {} });
+        } else {
+          try { process.kill(-child.pid, "SIGKILL"); }
+          catch { try { child.kill("SIGKILL"); } catch {} }
+        }
+        cleanupTimer = setTimeout(() => finish(-1), 2000);
       };
+      const onAbort = () => { aborted = true; stop("request cancelled", "ABORT_ERR"); };
       const timer = setTimeout(() => stop(`timed out after ${timeoutMs} ms`), timeoutMs);
       const append = (stream, data) => {
         if (done) return;
@@ -143,11 +148,12 @@ export function createCommandRunner({
         const text = decoders[stream].write(bytes.subarray(0, remaining));
         if (stream === 'stdout') stdout += text; else stderr += text;
         outputBytes += Math.min(bytes.length, remaining);
-        if (bytes.length > remaining) { outputLimited = true; stop(`output exceeded ${maxOutputBytes} bytes`); }
+        if (bytes.length > remaining) { outputLimited = true; stop(`output exceeded ${maxOutputBytes} bytes`, "OUTPUT_LIMIT"); }
       };
       child.stdout?.on("data", d => append('stdout', d));
       child.stderr?.on("data", d => append('stderr', d));
       child.on("error", (e) => {
+        spawnCode = e.code;
         stderr = String(e?.message ?? e);
         finish(-1);
       });
@@ -163,6 +169,6 @@ export function createCommandRunner({
       if (stdin !== undefined) {
         child.stdin.end(stdin + "\n");
       }
-      child.on("close", (code) => finish(code ?? -1));
+      child.on("close", (code) => finish(termination ? -1 : code ?? -1));
     });
 }

@@ -1,3 +1,4 @@
+import "./ui/plans.js";
 import "./ui/i18n.js";
 const { format, translate, message } = globalThis.DucoroI18n;
 // Read-only, projected plan: never return ownership records, endpoints or credentials.
@@ -56,6 +57,7 @@ export async function detectCapabilities(run) {
 export async function buildSyncPreview({
   options,
   currentOptions,
+  sourceOptions = options,
   paths,
   data,
   stateDir,
@@ -116,6 +118,7 @@ export async function buildSyncPreview({
         resources: [],
         accounts: [],
         model: null,
+        sources:Object.fromEntries(["model","mcp","skills","instructions"].map(kind=>[kind,globalThis.DucoroPlans.source(sourceOptions,id,kind)])),
       };
       result.rows.push(row);
     }
@@ -211,6 +214,7 @@ export async function buildSyncPreview({
       data.gatewayStatus === undefined || data.gatewayStatus === "connected";
     row.model = {
       current: bot.model,
+      applied:state.modelApplied?.[bot.id]?.model??null,
       desired: managed && sourceReady ? target : null,
       status: !managed
         ? "unmanaged"
@@ -235,7 +239,8 @@ export async function buildSyncPreview({
   if (signal?.aborted) abort();
   const timer = setTimeout(abort, budgetMs);
   const queue = bots.filter((bot) =>
-    ["pi-agent", "claude-code", "codex"].includes(bot.runtime),
+    ["pi-agent", "claude-code", "codex"].includes(bot.runtime) &&
+    (Object.keys(desired[bot.id]??{}).length>0 || Object.keys(state.accountConnectors?.[bot.id]??{}).length>0),
   );
   const inspect = async (bot) => {
     const row = rowFor(bot.id),
@@ -277,9 +282,12 @@ export async function buildSyncPreview({
         row.accounts.push({
           slug,
           current: safePolicy(actual),
+          applied: safePolicy(record?.applied),
+          previous: safePolicy(record?.previous),
           desired: safePolicy(transition.next),
           action: transition.action,
           ...(transition.conflict ? { revision: accountRevision(record) } : {}),
+          source:{type:"override"},
           reason: transition.conflict
             ? "工具权限已在 Ducoro 修改，现有权限会保留。"
             : want && !connected

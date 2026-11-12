@@ -1,3 +1,4 @@
+import {commandFailure} from './operation-controls.mjs'
 import { createHash } from "node:crypto";
 const preferenceRevision = value => createHash("sha256").update(JSON.stringify(value, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x)).digest("hex");
 import { mapLimit } from "./performance.mjs";
@@ -32,7 +33,7 @@ export function createModelSync({ operations, opts, run, getState, save, request
   const call = async args => {
     if (!isCurrent()) throw Error('model sync superseded by a gateway change')
     const result = await run(args, { timeoutMs: 30_000 })
-    if (!result.ok) throw Error(`Ducoro ${args.slice(0, 2).join(' ')} failed: ${result.json?.error?.message ?? 'CLI unavailable or request rejected'}`)
+    if (!result.ok) throw Object.assign(Error('Ducoro command failed'),commandFailure(result))
     return result.json
   }
   // Persist a transition before replacing the connection default. Otherwise
@@ -90,7 +91,10 @@ export function createModelSync({ operations, opts, run, getState, save, request
         const next = compatiblePreference(preference, model, info)
         const unchanged = JSON.stringify(next) === JSON.stringify(preference)
         operation = operations ? await operations.begin('gateway',bot.id,'model',desired,['connection'],unchanged) : true
-        if (!operation) return
+        if (!operation) {
+          if (!unchanged) complete = false
+          return
+        }
         if (unchanged) { await operations?.finish(operation); return }
         await call(['agent', 'update', bot.id, '--patch', JSON.stringify({ modelPreference: next })])
         const verified = record(await call(['agent', 'get', bot.id]))

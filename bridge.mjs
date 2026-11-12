@@ -1,9 +1,15 @@
+import {within} from './path-safety.mjs'
+import {validateLibrary} from './library-schema.mjs'
+import {skillFingerprint} from './content-preview.mjs'
+import {createOperationRetries} from './operation-retries.mjs'
+import {syncResources} from './sync-resources.mjs'
+import {commandFailure} from './operation-controls.mjs'
 import {mcpServerArgs} from './mcp-update.mjs'
 import { acquireSyncLock } from "./sync-lock.mjs"
 import { DEFAULTS } from "./defaults.mjs"
 export { DEFAULTS } from "./defaults.mjs"
 import {readOperationControls} from './operation-controls.mjs'
-import { defHash } from './resource-fingerprint.mjs'
+import { defHash,readableMcpHash } from './resource-fingerprint.mjs'
 import { maintainLocalRecords } from "./local-records.mjs"
 import { createSkillArtifacts } from "./skill-artifacts.mjs"
 import { createOperationStore } from "./operation-store.mjs"
@@ -39,6 +45,7 @@ import { createPageService } from "./page-service.mjs"
 import { readManagedState, saveManagedState } from "./state-store.mjs"
 import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
 import { syncAccountConnectors } from "./account-connectors.mjs"
+import { withCommandRecovery } from "./command-recovery.mjs"
 import { createCommandRunner } from "./command-runner.mjs"
 import { watch as fsWatch } from "node:fs"
 import {
@@ -188,6 +195,57 @@ const sameObj = (a, b) => {
 
 const NOT_FOUND_RE = /not_found|notfound|no (mcp server|connection|skill|credential)|no such|unknown (slug|connection)/i
 
+// ducoro-cli cannot carry commas inside single-use --env/--header/--args
+// flags; comma-bearing values move into the encrypted credential store and
+// are referenced as {{credentials.slug}}.
+const materializeSecrets = async (def, {run, dryRun = false}) => {
+  def.credentialRefs = []
+  const conv = async (pairs, kind) => {
+    const out = []
+    for (const [k, v] of pairs) {
+      if (v.includes(",")) {
+        // ducoro-cli credential refs must be "<provider>:<variant>" in
+        // kebab-case halves
+        const cslug = `${def.slug}:${kind}-${slugify(k).slice(0, 25)}-${sha256(k).slice(0, 12)}`
+        const r = dryRun
+          ? { ok: true }
+          : await run(["credentials", "put", "--slug", cslug, "--kind", "mcp_credential", "--stdin"], {
+              stdin: v,
+              timeoutMs: 30_000,
+            })
+        if (!r.ok) throw Object.assign(Error("could not store MCP credential"), commandFailure(r))
+        out.push([k, `{{credentials.${cslug}}}`])
+        def.credentialRefs.push(cslug)
+      } else {
+        out.push([k, v])
+      }
+    }
+    return out
+  }
+  if (def.env?.length) {
+    const env = await conv(def.env, "env")
+    def.env = env
+  }
+  if (def.headers?.length) {
+    const headers = await conv(def.headers, "hdr")
+    def.headers = headers
+  }
+  return true
+}
+
+// Resolve manifest identities only after a target has selected its sources.
+const scopedSkillBundles = (bundles, sourceNames) => {
+  const groups = new Map()
+  for (const bundle of bundles.values()) {
+    if (!sourceNames.has(bundle.sourceName) || !bundle.name) continue
+    const group = groups.get(bundle.name)
+    if (group) { group.sources.push(bundle.sourceName); group.bundle = null }
+    else groups.set(bundle.name, { sources: [bundle.sourceName], bundle })
+  }
+  for (const group of groups.values()) group.sources.sort()
+  return groups
+}
+
 // ---------------------------------------------------------------- engine
 
 const createEngine = (input = {}, options = {}) => {
@@ -286,7 +344,9 @@ const createEngine = (input = {}, options = {}) => {
     }
   }
 
-  const operations = createOperationStore({ getState: () => state, save: saveState })
+  const manualRetries = createOperationRetries()
+  let roundRetries = null
+  const operations = createOperationStore({ getState: () => state, save: saveState, onDefer: ms => requestRetry("operation-backoff",ms) })
 
   // --------------------------------------------------------------- cli
 
@@ -294,7 +354,7 @@ const createEngine = (input = {}, options = {}) => {
   const gatewayAbortError = () => Object.assign(new Error("gateway sync superseded by a resource change"), { name: "AbortError", code: "GATEWAY_SUPERSEDED" })
   const interruptGatewayReads = () => activeGatewayController?.abort()
 
-  const run = createReadCoordinator(createCommandRunner({opts,dryRun,rememberSecret,log,getGatewaySignal: () => activeGatewayController?.signal,gatewayAbortError}))
+  const run = createReadCoordinator(withCommandRecovery(createCommandRunner({opts,dryRun,rememberSecret,log,getGatewaySignal: () => activeGatewayController?.signal,gatewayAbortError})))
 
   const errMsg = (r) => {
     const j = r.json?.error?.message ?? r.json?.error?.code
@@ -487,7 +547,7 @@ const createEngine = (input = {}, options = {}) => {
       // stranger's route.
       if (str(cur.baseUrl) === want.baseUrl) {
         log(`adopting existing connection ${slug}`)
-        state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: str(cur.defaultModel) }
+        state.connection = { slug, keyHash: null, baseUrl: want.baseUrl, model: str(cur.defaultModel) }
       } else {
         warnOnce(
           `conn:${slug}`,
@@ -555,46 +615,6 @@ const createEngine = (input = {}, options = {}) => {
     return new Map(arr.filter((s) => str(s?.slug)).map((s) => [s.slug, s]))
   }
 
-  // ducoro-cli cannot carry commas inside single-use --env/--header/--args
-  // flags; comma-bearing values move into the encrypted credential store and
-  // are referenced as {{credentials.slug}}.
-  const materializeSecrets = async (def) => {
-    def.credentialRefs = []
-    const conv = async (pairs, kind) => {
-      const out = []
-      for (const [k, v] of pairs) {
-        if (v.includes(",")) {
-          // ducoro-cli credential refs must be "<provider>:<variant>" in
-          // kebab-case halves
-          const cslug = `${def.slug}:${kind}-${slugify(k).slice(0, 25)}-${sha256(k).slice(0, 12)}`
-          const r = dryRun
-            ? { ok: true }
-            : await run(["credentials", "put", "--slug", cslug, "--kind", "mcp_credential", "--stdin"], {
-                stdin: v,
-                timeoutMs: 30_000,
-              })
-          if (!r.ok) return null
-          out.push([k, `{{credentials.${cslug}}}`])
-          def.credentialRefs.push(cslug)
-        } else {
-          out.push([k, v])
-        }
-      }
-      return out
-    }
-    if (def.env?.length) {
-      const env = await conv(def.env, "env")
-      if (!env) return false
-      def.env = env
-    }
-    if (def.headers?.length) {
-      const headers = await conv(def.headers, "hdr")
-      if (!headers) return false
-      def.headers = headers
-    }
-    return true
-  }
-
   const addMcpServer = async (scope, def) =>
     run(
       mcpCommand(scope, "add", "--slug", def.slug, "--name", def.name, "--transport", def.transport, ...mcpServerArgs(def)),
@@ -630,7 +650,7 @@ const createEngine = (input = {}, options = {}) => {
 
   const loadLibrary = async () => {
     const lib = await readJson(paths.library)
-    if (!lib || (lib.mcp != null && !Array.isArray(lib.mcp)) || (lib.skills != null && !Array.isArray(lib.skills))) {
+    try { validateLibrary(lib) } catch {
       throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`)
     }
     return { ...lib, mcp: lib.mcp ?? [], skills: lib.skills ?? [] }
@@ -737,7 +757,41 @@ const createEngine = (input = {}, options = {}) => {
     if (changed) await saveState()
   }
 
+  const reconcileCreations = async kind => {
+    for(const [creationId,tx] of Object.entries(state.creations??{})) {
+      const id=`${tx.scope}:${tx.name}`
+      if(tx.kind!==kind)continue;
+      try {
+        if(kind==='mcp') {
+          const listed=await listMcpSlugs(tx.scope);if(!listed)throw Error('MCP inventory unavailable');
+          if(listed.has(tx.name)) {
+            const shown=await run(mcpCommand(tx.scope,'show',tx.name),{timeoutMs:5000});
+            if(!shown.ok || (shown.json?.server??shown.json)?.slug!==tx.name || readableMcpHash(shown.json)!==tx.contentHash)throw Error('MCP creation readback differs or is incomplete');
+            state.mcp[id]={scope:tx.scope,slug:tx.name,hash:tx.hash,sourceName:tx.sourceName};
+          }
+        } else {
+          const listed=await skillNames(tx.scope);if(!listed)throw Error('Skill inventory unavailable');
+          if(listed.has(tx.name)) {
+            const shown=await run(skillCommand(tx.scope,'show',tx.name),{timeoutMs:5000});
+            const item=shown.json?.skill??shown.json;
+            const info=await run(['info'],{timeoutMs:5000});
+            if(!shown.ok||item?.name!==tx.name||!item.dirPath||!info.ok||!info.json?.paths?.ducoroHome)throw Error('Skill creation readback unavailable');
+            const home=await realpath(paths.ducoroHome),installed=await realpath(item.dirPath);
+            if(home!==await realpath(info.json.paths.ducoroHome)||!within(home,installed,{allowRoot:false})||process.env.DUCORO_SERVER_URL&&!['127.0.0.1','localhost','[::1]'].includes(new URL(process.env.DUCORO_SERVER_URL).hostname))throw Error('Skill readback is not local');
+            if((await skillFingerprint(installed,{includeModes:false})).hash!==tx.contentHash)throw Error('Skill creation content differs');
+            state.skills[id]={scope:tx.scope,name:tx.name,sourceName:tx.sourceName,hash:tx.hash,dir:tx.dir};
+          }
+        }
+        delete state.creations[creationId];await saveState();
+      } catch(error) {
+        log(`Pending ${kind} creation ${id}: ${error.message}; inspect full content before recovery`);
+        requestRetry(kind==='mcp'?'mcp-conflict':'skill-conflict');
+      }
+    }
+  }
+
   const syncMcp = async (library) => {
+    await reconcileCreations('mcp')
     await migrateMcpOwnership()
     const wanted = new Map()
     for (const scope of resourcePlan.mcpScopes) {
@@ -772,7 +826,7 @@ const createEngine = (input = {}, options = {}) => {
     for (const [id, { scope, slug, def: source }] of wanted) {
       if (watching && pending) return
       const layer = current.get(scope)
-      if (!source || !layer) continue
+      if (!source || !layer || state.creations?.['mcp:'+id]) continue
       if (layer.has(slug) && !state.mcp[id]) {
         warnOnce(`mcp:${id}`, `MCP slug "${slug}" (${scope}) belongs to the user; skipped`)
         requestRetry("mcp-conflict")
@@ -786,24 +840,33 @@ const createEngine = (input = {}, options = {}) => {
       const changed = !layer.has(slug) || mine?.hash !== hash
       const operation = await operations.begin('mcp',scope,slug,hash,['revoke-mcp'],!changed)
       if (!operation) {
+        if(changed)requestRetry('mcp-sync');
         if (forceMcpProbe || layer.get(slug)?.connectionStatus !== 'connected') pendingMcpProbes.set(id, {scope,slug,roundId:diagnostics.token()});
         continue
       }
-      if (changed && !(await materializeSecrets(def))) {
-        await operations.finish(operation,false)
-        log(`mcp ${slug} (${scope}) skipped: could not store its credential`)
-        requestRetry("mcp-sync")
-        continue
+      if (changed) {
+        try { await materializeSecrets(def, {run, dryRun}) }
+        catch (error) {
+          await operations.finish(operation,false,[],error)
+          log(`mcp ${slug} (${scope}) skipped: could not store its credential`)
+          requestRetry("mcp-sync")
+          continue
+        }
       }
       if (changed) {
+        if(!layer.has(slug)) {
+          state.creations??={};state.creations['mcp:'+id]={kind:'mcp',scope,name:slug,sourceName:source.name,hash,contentHash:defHash(def)};
+          await saveState();
+        }
         const r = layer.has(slug) ? await updateMcpServer(scope, slug, def) : await addMcpServer(scope, def)
         if (r.ok) {
           state.mcp[id] = { scope, slug, hash, sourceName: source.name }
+          if(state.creations)delete state.creations['mcp:'+id]
           await operations.finish(operation,true,[['mcp',id]])
           await saveState()
           pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
         } else {
-          await operations.finish(operation,false,[],Error(errMsg(r)))
+          await operations.finish(operation,false,[],Object.assign(Error(errMsg(r)),commandFailure(r)))
           log(`saving MCP server ${slug} (${scope}) failed (kept for retry): ${errMsg(r)}`)
           requestRetry("mcp-sync")
         }
@@ -828,20 +891,21 @@ const createEngine = (input = {}, options = {}) => {
   const readBundle = async (source) => {
     const root = await realpath(source)
     const files = []
+    let bytesTotal=0
     const walk = async (dir, rel = "", parents = new Set()) => {
       const resolved = await realpath(dir)
-      if (resolved !== root && !resolved.startsWith(root + "/")) throw new Error("skill link escapes its bundle")
+      if (!within(root,resolved)) throw new Error("skill link escapes its bundle")
       if (parents.has(resolved)) throw new Error("cyclic skill link")
       const ancestors = new Set([...parents, resolved])
       for (const e of await readdir(dir, { withFileTypes: true })) {
         if (e.name === ".DS_Store" || e.name === ".git") continue
         const path = join(dir, e.name)
         const target = await realpath(path)
-        if (target !== root && !target.startsWith(root + "/")) throw new Error("skill link escapes its bundle")
+        if (!within(root,target)) throw new Error("skill link escapes its bundle")
         const info = await stat(path)
         const name = rel ? `${rel}/${e.name}` : e.name
         if (info.isDirectory()) await walk(path, name, ancestors)
-        else if (info.isFile()) files.push({ name, path, mode: info.mode & 0o777 })
+        else if (info.isFile()) { bytesTotal+=info.size; if(files.length>=5000 || bytesTotal>32*1024*1024)throw Error("skill bundle too large"); files.push({ name, path, mode: info.mode & 0o777 }) }
         else throw new Error(`unsupported skill entry: ${name}`)
       }
     }
@@ -915,8 +979,7 @@ const createEngine = (input = {}, options = {}) => {
         if (watching && generation === skillCacheGeneration) skillBundleCache.set(root, bundle)
         const name = skillName(bundle.md, sourceName)
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("invalid skill manifest name")
-        if (found.has(name)) throw new Error(`duplicate skill manifest name ${name}`)
-        found.set(name, { sourceName, dir, ...bundle })
+        found.set(sourceName, { name, sourceName, dir, ...bundle })
       } catch (e) {
         log(`selected skill ${sourceName} cannot be prepared: ${e.message}`)
         requestRetry("skill-source")
@@ -926,6 +989,9 @@ const createEngine = (input = {}, options = {}) => {
     for (const root of skillBundleCache.keys()) if (!activeSkillRoots.has(root)) skillBundleCache.delete(root)
     return found
   }
+
+  let roundSkillBundles = null
+  const skillBundlesForRound = library => roundSkillBundles ??= listSkillBundles(library)
 
   const removeNamedSkill = async (scope, name) => {
     const r = await run(skillCommand(scope, "remove", name), { timeoutMs: 30_000 })
@@ -947,6 +1013,7 @@ const createEngine = (input = {}, options = {}) => {
   }
 
   const pruneSkills = async (library) => {
+    await reconcileCreations("skills")
     let complete = true
     const sourceNames = new Map(resourcePlan.skillScopes.map(scope => [scope,
       new Set(selected(scopedLibrary(library, opts, "skills", scope).skills).map(item => str(item.name))),
@@ -957,7 +1024,13 @@ const createEngine = (input = {}, options = {}) => {
         state.skills[`global:${id}`] = { ...mine, scope: "global", name: id, sourceName: id }
       }
     }
+    const bundles = opts.syncSkills ? await skillBundlesForRound(library) : new Map()
+    const conflicts = new Map([...sourceNames].map(([scope,names]) => [scope,
+      new Set([...scopedSkillBundles(bundles,names)].filter(([,group]) => !group.bundle).map(([name]) => name)),
+    ]))
     for (const [id, mine] of Object.entries(state.skills)) {
+      // A selected ambiguous name cannot authorize deleting its current import.
+      if (conflicts.get(mine.scope)?.has(mine.name)) continue
       if (!sourceNames.get(mine.scope)?.has(mine.sourceName) && !(await removeSkill(id, mine))) complete = false
     }
     if (![...sourceNames.values()].some(names => names.size)) { activeSkillRoots.clear(); invalidateSkillCache() }
@@ -1009,25 +1082,32 @@ const createEngine = (input = {}, options = {}) => {
 
   const syncSkills = async (library) => {
     if (!(await pruneSkills(library))) return
-    const bundles = opts.syncSkills ? await listSkillBundles(library) : new Map()
+    const bundles = opts.syncSkills ? await skillBundlesForRound(library) : new Map()
     if (!bundles.size) return
     for (const scope of resourcePlan.skillScopes) {
       const sourceNames = new Set(selected(scopedLibrary(library, opts, "skills", scope).skills).map(item => str(item.name)))
+      const scopedBundles = scopedSkillBundles(bundles,sourceNames)
+      for (const [name,group] of scopedBundles) if (!group.bundle) {
+        const operation = await operations.begin('skills',scope,name,{conflictingSources:group.sources},['revoke-skills'])
+        await operations.finish(operation,false,[],{failureClass:'conflict'})
+        log(`skill "${name}" (${scope}) has conflicting library sources: ${group.sources.join(', ')}; existing import retained`)
+        requestRetry("skill-source-conflict")
+        diagnostics.retry("skill-source-conflict",["skills"],scope === "global" ? [] : [scope])
+      }
       if (roundSkillPaths && !Object.values(state.skills).some(row => row.scope === scope && row.replacement) &&
-          ![...bundles.values()].some(bundle => sourceNames.has(bundle.sourceName) && bundle.dir && [...roundSkillPaths].some(path => path === bundle.dir || path.startsWith(bundle.dir + '/') || bundle.dir.startsWith(path + '/')))) continue
+          ![...bundles.values()].some(bundle => sourceNames.has(bundle.sourceName) && bundle.dir && [...roundSkillPaths].some(path => within(bundle.dir,path) || within(path,bundle.dir)))) continue
       const existing = await skillNames(scope)
       if (!existing) continue
       for (const [id, mine] of Object.entries(state.skills)) {
-        if (mine.scope === scope && mine.replacement) await recoverSkillReplacement(id, mine, existing)
+        if (mine.scope === scope && mine.replacement && scopedBundles.get(mine.name)?.bundle !== null) await recoverSkillReplacement(id, mine, existing)
       }
-      for (const [name, bundle] of bundles) {
+      for (const [name, {bundle}] of scopedBundles) {
         if (watching && pending) return
-        if (!sourceNames.has(bundle.sourceName)) continue
-        if (!bundle.dir) continue
+        if (!bundle?.dir) continue
         const { dir, hash, sourceName } = bundle
         const id = `${scope}:${name}`
         let mine = state.skills[id]
-        if (mine?.replacement) continue
+        if (mine?.replacement || state.creations?.['skills:'+id]) continue
         if (existing.has(name) && !mine) {
           warnOnce(`skill:${id}`, `skill "${name}" exists in Ducoro (${scope}) and was not imported by this plugin; skipped`)
           requestRetry("skill-conflict")
@@ -1035,7 +1115,7 @@ const createEngine = (input = {}, options = {}) => {
         }
         if (mine?.hash === hash && existing.has(name)) { const op=await operations.begin('skills',scope,name,hash,['revoke-skills'],true); await operations.finish(op); continue }
         const operation = await operations.begin('skills', scope, name, hash, ['revoke-skills'])
-        if (!operation) continue
+        if (!operation) {requestRetry('skill-import');continue}
         try {
           const staged = await artifacts.prepare(name, bundle)
           if (mine && existing.has(name)) {
@@ -1048,7 +1128,7 @@ const createEngine = (input = {}, options = {}) => {
             if (!backup.ok) {
               log(`backing up skill ${name} failed; update deferred: ${errMsg(backup)}`)
               requestRetry("skill-backup")
-              await operations.finish(operation, false, [], Error(errMsg(backup)))
+              await operations.finish(operation, false, [], Object.assign(Error(errMsg(backup)),commandFailure(backup)))
               continue
             }
             existing.delete(name)
@@ -1056,9 +1136,14 @@ const createEngine = (input = {}, options = {}) => {
             mine.replacement.phase = "backed-up"
             await saveState()
           }
+          if(!mine) {
+            state.creations??={};state.creations['skills:'+id]={kind:'skills',scope,name,sourceName,hash,dir,contentHash:(await skillFingerprint(staged,{includeModes:false})).hash};
+            await saveState();
+          }
           const r = await run(skillCommand(scope, "import", staged), { timeoutMs: 60_000 })
           if (r.ok) {
             existing.add(name)
+            if(state.creations)delete state.creations['skills:'+id]
             state.skills[id] = { scope, name, sourceName, hash, dir, ...(mine?.replacement ? { replacement: { ...mine.replacement, phase: "installed" } } : {}) }
             mine = state.skills[id]
             await saveState()
@@ -1072,7 +1157,7 @@ const createEngine = (input = {}, options = {}) => {
             log(`skill ${name} imported (${scope})`)
           } else {
             log(`importing skill ${name} failed; restoring previous version: ${errMsg(r)}`)
-            await operations.finish(operation, false, [], Error(errMsg(r)))
+            await operations.finish(operation, false, [], Object.assign(Error(errMsg(r)),commandFailure(r)))
             requestRetry("skill-import")
             if (mine?.replacement) await recoverSkillReplacement(id, mine, existing)
           }
@@ -1186,7 +1271,7 @@ const createEngine = (input = {}, options = {}) => {
     if (path === paths.instructions) return ['total']
     if (path === paths.mcp) return ['mcp']
     if ([paths.bridge,paths.providers,paths.pluginProviders].includes(path)) return ['gateway']
-    if ([paths.skills,paths.librarySkills,...activeSkillRoots].some(root => path === root || path.startsWith(root + '/'))) return ['skills']
+    if ([paths.skills,paths.librarySkills,...activeSkillRoots].some(root => within(root,path))) return ['skills']
     return ['all']
   }
   const syncAllUnlocked = async (reason = "tick") => {
@@ -1198,6 +1283,10 @@ const createEngine = (input = {}, options = {}) => {
       requestRetry(error.code)
       return
     }
+    const controls = await readOperationControls(stateDir)
+    roundRetries = manualRetries.take(state.operations)
+    if (roundRetries.size) roundSkillPaths = null
+    operations.reset({controls,retryIds:roundRetries})
     const invalidOptions = [...validateOptions(rawOptions), ...validateOptions(opts)]
     if (invalidOptions.length) {
       // Invalid access selections must never fall through to an inherited or
@@ -1226,33 +1315,7 @@ const createEngine = (input = {}, options = {}) => {
           diagnostics.retry("resource-selection-unavailable", [issue.kind], [issue.scope])
         }
       }
-      // Revocations run before additions, large bundle reads, or gateway work.
-      try { if (resourcePlan && wants("skills")) await progress.step("revoke-skills", () => pruneSkills(library)) } catch (e) {
-        log("skill cleanup error:", e?.message ?? e)
-        requestRetry("skill-cleanup")
-      }
-      try {
-        if (resourcePlan && wants("mcp")) {
-          await progress.step("mcp", () => syncMcp(opts.syncMcp ? library : { ...library, mcp: [] }))
-          diagnostics.stage("mcp", "configured", { targets: resourcePlan.mcpScopes, count: Object.keys(state.mcp).length })
-        }
-      } catch (e) {
-        log("mcp sync error:", e?.message ?? e)
-        requestRetry("mcp-sync")
-      }
-      try { if (wants("total")) totalForRound = await progress.step("instructions-subagents", () => syncTotal(library)) } catch (e) {
-        log("Total sync error:", e?.message ?? e)
-        requestRetry("total-sync")
-      }
-      try {
-        if (resourcePlan && wants("skills")) {
-          await progress.step("skills", () => syncSkills(library))
-          diagnostics.stage("skills", "configured", { targets: resourcePlan.skillScopes, count: Object.keys(state.skills).length })
-        }
-      } catch (e) {
-        log("skill sync error:", e?.message ?? e)
-        requestRetry("skill-sync")
-      }
+      await syncResources({library,resourcePlan,wants,progress,pruneSkills,syncMcp,syncTotal,syncSkills,diagnostics,state,opts,requestRetry,log,setTotal:value=>{totalForRound=value}})
     }
     try {
       if (wants("accounts")) await progress.step("accounts", () => syncAccountConnectors({ options: opts, state, run, save: saveState, operations }))
@@ -1267,9 +1330,12 @@ const createEngine = (input = {}, options = {}) => {
   // Magpie CLI commands start their own plugin hosts while the app's host
   // stays alive. Serialize their writes and reload ownership each round so
   // an older host cannot overwrite another host's newly imported skills.
+  let resumeReview=false
   let syncing = false
   const syncAll = async (reason = "tick") => {
-    if (syncing || stopped) return false
+    if (stopped) return false
+    manualRetries.add(reason)
+    if (syncing) return false
     syncing = true
     if (!watching || reason === "interval" || reason === "startup" || reason === "page-retry") invalidateSkillCache()
     let releaseLock;
@@ -1278,13 +1344,20 @@ const createEngine = (input = {}, options = {}) => {
         releaseLock = await acquireSyncLock(stateDir,{recover:true});
         if (!releaseLock) return false;
       }
+      const reviewFile=join(stateDir,'restore-review.json');
+      try {
+        await readFile(reviewFile);
+        if(reason!=='page-retry' && reason!=='manual' && !resumeReview) { log('Restored management records await preview and manual synchronization'); return true }
+        await rm(reviewFile);resumeReview=false;
+      } catch(error) { if(error.code!=='ENOENT')throw error } finally {resumeReview=false}
       const changes = dirtyFeatures; dirtyFeatures = new Set()
       const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
       roundFeatures = (reason.startsWith('retry:') || ['file-change','coalesced','page-retry-failed'].includes(reason) || reason.startsWith('page-operation:')) && changes.size && !changes.has('all') ? changes : null
       roundSkillPaths = roundFeatures && skillPaths.size ? skillPaths : null
       retryRequested = false
       artifacts.reset()
-      operations.reset({controls:await readOperationControls(stateDir),selection:reason.startsWith('page-operation:')?reason.split(':')[1]:null})
+      roundSkillBundles = null
+      roundRetries = null
       stateLoaded = false
       state = { v: 2, connection: null, mcp: {}, skills: {} }
       progress.begin(reason, { ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
@@ -1305,9 +1378,13 @@ const createEngine = (input = {}, options = {}) => {
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
-      if (releaseLock) await releaseLock()
-      progress.end({ ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
-      syncing = false
+      // A superseding source event can defer a resource before begin() runs.
+      // Carry those requests into the next round; new clicks stay in the queue.
+      if (roundRetries) manualRetries.restore(operations.remainingRetries())
+      roundRetries = null
+      try { if (releaseLock) await releaseLock() } finally {
+        try { progress.end({ ...run.metrics(), ...fileMetrics, ...artifacts.metrics() }) } finally { syncing = false }
+      }
       // Probing remote servers must not hold the mutation lock or delay a
       // subsequent Library event. Manual syncs still wait for their diagnostics.
       if (watching) {
@@ -1348,7 +1425,7 @@ const createEngine = (input = {}, options = {}) => {
   let refreshAgain = false
   const watchers = new Map()
 
-  const requestRetry = (reason) => {
+  const requestRetry = (reason, minDelay = 0) => {
     progress.fail()
     // Diagnostics also cover manual one-shot runs, where no retry timer runs.
     // Total's per-resource report provides finer attribution than its shared
@@ -1362,7 +1439,7 @@ const createEngine = (input = {}, options = {}) => {
     retryTimer = setTimeout(() => {
       retryTimer = null
       trigger(`retry:${reason}`, 0)
-    }, retryDelay)
+    }, Math.max(retryDelay,minDelay))
     retryDelay = Math.min(60_000, retryDelay * 2)
   }
 
@@ -1370,16 +1447,14 @@ const createEngine = (input = {}, options = {}) => {
   // writes cannot postpone a user's selection indefinitely.
   const trigger = (reason = "file-change", delay = 75) => {
     if (!watching) return
+    if(reason==='page-retry')resumeReview=true
     if(reason.startsWith('page-operation:')) {
-      const feature=reason.split(':')[2];
-      if(!['gateway','accounts','total','mcp','skills'].includes(feature))return;
-      dirtyFeatures.add(feature);
+      if(!manualRetries.add(reason))return
+      dirtyFeatures.add(reason.split(':')[2])
     } else if (reason === 'page-retry-failed') {
-      const map = {models:'gateway',connection:'gateway',mcp:'mcp',skills:'skills',instructions:'total',subagents:'total'}
-      const report = diagnostics.read({syncing,watchDegraded})
-      for(const [key,value] of Object.entries(report.features ?? {})) if(value.status==='pending') dirtyFeatures.add(map[key] ?? 'all')
-      if(report.issues?.some(issue => issue.code?.includes('account')))dirtyFeatures.add('accounts')
-      if(!dirtyFeatures.size)return
+      manualRetries.add(reason)
+      // The persisted failed rows are authoritative, even if diagnostics are stale.
+      dirtyFeatures.add('all')
     } else if (!reason.startsWith("retry:") && !["file-change","coalesced"].includes(reason)) dirtyFeatures.add("all")
     if (reason === "file-change" || reason === "watch-fallback") interruptGatewayReads()
     if (running) { pending = true; return }
@@ -1447,7 +1522,7 @@ const createEngine = (input = {}, options = {}) => {
         }
         // A recursive root already covers its physical subdirectories.
         for (const dir of [...desired.keys()]) {
-          if ([...desired].some(([parent, entry]) => parent !== dir && entry.recursive && dir.startsWith(parent + "/"))) desired.delete(dir)
+          if ([...desired].some(([parent, entry]) => parent !== dir && entry.recursive && within(parent,dir,{allowRoot:false}))) desired.delete(dir)
         }
         if (!watching) break
         watchDegraded = false
@@ -1473,7 +1548,7 @@ const createEngine = (input = {}, options = {}) => {
               else if (features.includes('skills')) {
                 dirtySkillPaths.add(changedPath)
                 skillCacheGeneration++
-                for (const root of skillBundleCache.keys()) if (changedPath === root || changedPath.startsWith(root + '/') || root.startsWith(changedPath + '/')) skillBundleCache.delete(root)
+                for (const root of skillBundleCache.keys()) if (within(root,changedPath) || within(changedPath,root)) skillBundleCache.delete(root)
               }
               trigger("file-change")
               void refreshWatches()
@@ -1564,6 +1639,7 @@ const createEngine = (input = {}, options = {}) => {
     await refreshPromise
     await activeRun
     await drainMcpProbes()
+    manualRetries.clear()
   }
 
   return {
@@ -1589,6 +1665,7 @@ export default { id: "magpie-ducoro", server: DucoroBridge }
 
 export const _internal = {
   createEngine,
+  materializeSecrets,
   DEFAULTS,
   DEFAULT_PATHS,
   sha256,

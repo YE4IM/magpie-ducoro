@@ -1,4 +1,6 @@
-import {readOperationControls,setOperationControl} from './operation-controls.mjs';
+import {readJsonBody,apiFailure} from './page-http.mjs';
+import {readDraft,saveDraft,withDraftLock} from './draft-store.mjs';
+import {failureAdvice,readOperationControls,setOperationControl} from './operation-controls.mjs';
 import { inspectSyncLock } from "./lock-diagnostics.mjs";
 import { acquireSyncLock } from "./sync-lock.mjs";
 import { previewLocalRecords, cleanLocalRecords } from "./local-records.mjs";
@@ -11,7 +13,8 @@ const { translate, format, localizeReport, languageFor, message } =
 // Loopback page service. Inventory is projected explicitly: no raw credentials,
 // account records, endpoint URLs, server arguments or skill bodies reach HTML.
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
+import {validateLibrary} from './library-schema.mjs';
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -30,7 +33,7 @@ import {
   toolRows,
 } from "./inventory-shapes.mjs";
 export { list, selected, policyRows, toolRows } from "./inventory-shapes.mjs";
-const jsonFile = async (path) => JSON.parse(await readFile(path, "utf8"));
+const jsonFile=async path=>JSON.parse(await readFile(path,"utf8"));
 
 export function gatewayModelState(value) {
   const object = (x) =>
@@ -118,6 +121,7 @@ export async function inventory({
     })),
     jsonFile(paths.library)
       .then((value) => {
+        validateLibrary(value);
         if (
           !Array.isArray(value.mcp ?? []) ||
           !Array.isArray(value.skills ?? [])
@@ -220,6 +224,7 @@ export async function createPageService({
       if (type.startsWith("application/json") && body?.error)
         body = {
           ...body,
+          errorCode: body.errorCode ?? ({400:"INVALID_INPUT",403:"FORBIDDEN",404:"NOT_FOUND",409:"CONFLICT",413:"REQUEST_TOO_LARGE",422:"INVALID_INPUT",503:"SERVICE_UNAVAILABLE"})[code] ?? "REQUEST_FAILED",
           error: translate(body.error, language),
           errorMessage: message(body.error),
         };
@@ -267,27 +272,17 @@ export async function createPageService({
         if(path==='api/lock' && req.method==='GET')return reply(200,await inspectSyncLock(stateDir));
         if(path==='api/draft' && ['GET','POST'].includes(req.method)) {
           const file=join(stateDir,'page-draft.json');
-          if(req.method==='GET')return reply(200,await jsonFile(file).catch(()=>({})));
-          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>1024*1024)return reply(413,{error:'请求过大'});}
-          const value=JSON.parse(body);
-          return reply(200,await withBackupLock(stateDir,async()=>{
-            const previous=await jsonFile(file).catch(e=>{if(e.code==='ENOENT')return {};throw e;});
-            if((value.revision??null)!==(previous.revision??null))return {conflict:true,revision:previous.revision};
-            if(value.clear){const revision=randomBytes(16).toString('hex');await writeFile(file+'.tmp',JSON.stringify({revision}),{mode:0o600});await rename(file+'.tmp',file);return {revision};}
-            let editor=null;
-            if(value.editor){const raw=value.editor;if(!Array.isArray(raw.values)||raw.values.length!==5||raw.values.some(x=>typeof x!=='string')||typeof raw.selected!=='string'||typeof raw.dirty!=='boolean'||raw.targets!==null&&(!Array.isArray(raw.targets)||raw.targets.some(id=>!/^agt-[A-Za-z0-9-]+$/.test(id))))throw Error('Invalid draft editor');editor={selected:raw.selected,dirty:raw.dirty,targets:raw.targets,values:raw.values};}
-            const data={base:projectOptions(value.base??{}),options:projectOptions(value.options??{}),editor,revision:randomBytes(16).toString('hex'),at:Date.now()};
-            const temporary=file+'.tmp';await writeFile(temporary,JSON.stringify(data),{mode:0o600});await rename(temporary,file);return {saved:true,revision:data.revision};
-          }));
+          if(req.method==='GET')return reply(200,await readDraft(file));
+          const value=await readJsonBody(req,1024*1024);
+          return reply(200,await withDraftLock(stateDir,()=>saveDraft(file,value)));
         }
         if ((req.method === 'GET' && path === 'api/local-records') || (req.method === 'POST' && path === 'api/local-records/clean')) {
-          let body='';
-          if(req.method==='POST')for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'请求过大'});}
+          const value=req.method==='POST'?await readJsonBody(req,4096):null;
           const release=await acquireSyncLock(stateDir);
           if(!release)return reply(409,{error:'正在同步，请完成后再清理本地记录。'});
           let result, failure;
           try {
-            result=req.method==='GET'?await previewLocalRecords(stateDir):await cleanLocalRecords(stateDir,JSON.parse(body).token);
+            result=req.method==='GET'?await previewLocalRecords(stateDir):await cleanLocalRecords(stateDir,value.token);
           }catch(error){failure=error;}finally{await release();}
           if(failure) {
             // Only authored public messages may cross the page API boundary.
@@ -307,11 +302,7 @@ export async function createPageService({
         const backupAction = /^api\/backup-files\/(state|checkpoints)\/(import-preview|import|clear-preview|clear|open-directory|create|metadata|export)$/.exec(path);
         if (backupAction && req.method === 'POST') {
           const [,kind,action]=backupAction;
-          const chunks=[];let bytes=0;
-          for await(const chunk of req) {bytes+=chunk.length;if(bytes>16*1024*1024)return reply(413,{error:'备份文件过大，最大支持 8 MiB。'});chunks.push(chunk);}
-          let value;
-          try {value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!value||typeof value!=='object'||Array.isArray(value))throw Error();}
-          catch {return reply(400,{error:'备份文件格式无效。'});}
+          const value=await readJsonBody(req,16*1024*1024);
           try {
             if(action==='open-directory')return reply(200,await openBackupDirectory(stateDir,kind));
             if(action==='import-preview')return reply(200,previewBackupImport(kind,value.content));
@@ -331,8 +322,7 @@ export async function createPageService({
           return reply(200, await inspectDrift({options,state:loaded.state,paths,run,signal:requestController.signal}));
         }
         if (req.method === 'POST' && ['api/checkpoints','api/rollback-preview'].includes(path)) {
-          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>512*1024)return reply(413,{error:'Request too large'});}
-          const value=JSON.parse(body);
+          const value=await readJsonBody(req);
           if(path==='api/checkpoints') {
             if(revision(projectOptions(value.before ?? {}))!==revision(projectOptions(options)))return reply(409,{error:'Configuration changed; reload before saving'});
             try {return reply(200, {checkpoint:await withBackupLock(stateDir,()=>createCheckpoint(stateDir,value.before,value.after))});}
@@ -402,9 +392,7 @@ export async function createPageService({
         if (path === "api/state-backups" && req.method === "GET")
           return reply(200, {backups: await stateBackups(join(stateDir,"state.json"))});
         if (["api/state-backups/preview", "api/state-backups/restore", "api/state-backups/delete"].includes(path) && req.method === "POST") {
-          let body="";
-          for await(const chunk of req) {body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:"请求过大"});}
-          const {id,checksum}=JSON.parse(body);
+          const {id,checksum}=await readJsonBody(req,4096);
           const file=join(stateDir,"state.json");
           if(path.endsWith("preview")) {
             const {state,...preview}=await previewStateBackup(file,id);
@@ -415,6 +403,7 @@ export async function createPageService({
           if(!release)return reply(409,{error:"正在同步，请完成后再操作备份。"});
           try {
             if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
+            await writeFile(join(stateDir,'restore-review.json'),JSON.stringify({pending:true,at:new Date().toISOString()}),{mode:0o600});
             await restoreStateBackup(file,id,checksum);
           } finally {await release();}
           return reply(200,{restored:true});
@@ -454,11 +443,11 @@ export async function createPageService({
         }
         if(path==='api/operations' && req.method==='GET') {
           const loaded=await readManagedState(join(stateDir,'state.json')),controls=await readOperationControls(stateDir);
-          return reply(200,{operations:Object.entries(loaded.state.operations??{}).filter(([,row])=>row.status!=='completed').map(([id,row])=>({id,feature:row.feature,target:row.target,resource:row.resource,status:row.status,attempts:row.attempts,failureClass:row.failureClass??'temporary',paused:!!controls[id]?.paused}))});
+          const all=Object.entries(loaded.state.operations??{});
+          return reply(200,{summary:{total:all.length,completed:all.filter(([,r])=>r.status==='completed').length,failed:all.filter(([,r])=>r.status==='failed').length},operations:all.sort((a,b)=>b[1].updatedAt.localeCompare(a[1].updatedAt)).map(([id,row])=>({id,feature:row.feature,target:row.target,resource:row.resource,status:row.status,attempts:row.attempts,failureClass:row.failureClass??null,paused:!!controls[id]?.paused,updatedAt:row.updatedAt,nextRetryAt:row.nextRetryAt??null,needsAttention:row.status==='failed'&&row.failureClass!=='temporary',advice:row.status==='failed'?failureAdvice(row.failureClass):null}))});
         }
         if(path==='api/operations' && req.method==='POST') {
-          let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'Request too large'});}
-          const value=JSON.parse(body);
+          const value=await readJsonBody(req,4096);
           if(!/^[a-f0-9]{64}$/.test(value.id??'')||!['retry','pause','resume'].includes(value.action))return reply(422,{error:'Invalid operation control'});
           let operationFeature;
           try {await withBackupLock(stateDir,async()=>{
@@ -481,21 +470,7 @@ export async function createPageService({
           req.method === "POST" &&
           ["api/validate", "api/preview"].includes(path)
         ) {
-          let size = 0,
-            chunks = [];
-          for await (const chunk of req) {
-            size += chunk.length;
-            if (size > 512 * 1024) return reply(413, { error: "设置内容过大" });
-            chunks.push(chunk);
-          }
-          let value;
-          try {
-            value = JSON.parse(Buffer.concat(chunks).toString());
-          } catch {
-            return reply(400, {
-              error: "设置格式无效，请检查分配和工具权限。",
-            });
-          }
+          const value=await readJsonBody(req);
           if (validateOptions(value).length)
             return reply(400, {
               error: "设置格式无效，请检查分配和工具权限。",
@@ -519,6 +494,7 @@ export async function createPageService({
               await buildSyncPreview({
                 options: next,
                 currentOptions: globalThis.DucoroPlans.resolve(options),
+                sourceOptions: {...options,...value},
                 data,
                 stateDir,
                 paths,
@@ -544,14 +520,17 @@ export async function createPageService({
           "index.html",
           "style.css",
           "app.js",
+          "drafts.js",
           "model.js",
           "defaults.js",
           "service-bridge.js",
           "resources.js",
           "reliability.js",
+          "verification-tracker.js",
           "backup-files.js",
           "plans.js",
           "control-center.js",
+          "task-center.js",
           "preview.js",
           "i18n.js",
           "ducoro.svg",
@@ -577,12 +556,13 @@ export async function createPageService({
         // Explicit loopback sources work inside WebKit's opaque sandbox.
         res.setHeader(
           "Content-Security-Policy",
-          `sandbox allow-scripts; default-src 'none'; script-src 'self' http://127.0.0.1:${port}; style-src 'self' 'unsafe-inline' http://127.0.0.1:${port}; img-src 'self' data: http://127.0.0.1:${port}; connect-src 'self' http://127.0.0.1:${port}; frame-ancestors 'self' wails://localhost http://127.0.0.1:* http://localhost:*`,
+          `sandbox allow-scripts allow-downloads; default-src 'none'; script-src 'self' http://127.0.0.1:${port}; style-src 'self' 'unsafe-inline' http://127.0.0.1:${port}; img-src 'self' data: http://127.0.0.1:${port}; connect-src 'self' http://127.0.0.1:${port}; frame-ancestors 'self' wails://localhost http://127.0.0.1:* http://localhost:*`,
         );
       }
       reply(200, body, types[file.split(".").pop()]);
-    } catch {
-      reply(503, { error: "读取失败，请检查 Ducoro 是否运行，然后重试。" });
+    } catch (error) {
+      const failure=apiFailure(error);
+      reply(failure.status,failure.body);
     }
   });
   // Hosts overlap during reload. Keep trying after the old listener exits,

@@ -6,25 +6,28 @@
   const policy=p=>p===null?t('未配备'):t`允许：${names(p.allow)}；拒绝：${names(p.deny)}`
   const actions={add:t('新增'),update:t('更新'),remove:t('撤销'),restore:t('恢复原权限'),keep:t('保持'),conflict:t('外部修改冲突'),unmanaged:t('由 Ducoro 管理')}
   const status={disconnected:t('Magpie 尚未连接，保持当前模型'),'source-unknown':t('Magpie 导出暂不可读，模型同步暂缓'),same:t('已一致'),change:t('等待同步'),unavailable:t('目标模型当前不可用'),unknown:t('写入能力尚未确认'),unmanaged:t('此 Bot 模型不在同步范围')}
+  const sourceLabel=source=>source?.type==='plan'?t`继承方案：${source.plan}`:source?.type==='override'?t('Bot 单项覆盖'):t('全局设置');
   function renderRow(row,onResolve) {
     const block=el('section',undefined,'preview-bot')
     block.append(el('h3',row.id==='global'?t('全局资源'):row.name),el('p',row.id,'muted'))
+    for(const [kind,source] of Object.entries(row.sources??{}))block.append(el('p',t`${DucoroI18n.featureLabel(kind==='model'?'models':kind)} · ${sourceLabel(source)}${source.additive?' · '+t('追加到全局指令'):''}`,'muted'));
     if(row.model){
       const table=el('div',undefined,'comparison-grid')
-      table.append(el('div',t`Ducoro 当前模型\n${row.model.current||t('未配置')}`),el('div',t`Magpie 期望模型\n${row.model.desired||t('保持当前模型')}`))
-      block.append(table,el('p',status[row.model.status],'muted'))
+      table.append(el('div',t`上次同步模型\n${row.model.applied??t('尚无记录')}`),el('div',t`Ducoro 当前模型\n${row.model.current||t('未配置')}`),el('div',t`Magpie 期望模型\n${row.model.desired||t('保持当前模型')}`))
+      block.append(table,el('p',status[row.model.status],'muted'));if(row.model.status==='change')block.append(el('p',t('变化原因：有效模型选择与 Ducoro 当前模型不同。'),'muted'))
     }
     for(const item of row.resources) {
       const name=t(({skills:'技能',instructions:'指令',subagents:'子代理'})[item.kind]??'资源库连接器')
       const resourceName=item.nameMessage?t(item.nameMessage):item.name
       block.append(el('p',item.action==='effective'?t`${name} · 预计获得：${names(item.gained)}；预计失去插件提供的资源：${names(item.lost)}`:t`${name} · ${actions[item.action]??t('待核实')} · ${resourceName}`))
+      if(['add','remove','effective','update'].includes(item.action))block.append(el('p',t(item.action==='update'?'变化原因：源内容或权限与上次同步记录不同。':'变化原因：同步开关、分配范围或继承设置改变了有效资源。'),'muted'));
       if(item.summaryMessage||item.summary)block.append(el('p',t(item.summaryMessage??item.summary),'muted'))
     }
     for(const item of row.accounts) {
       const section=el('div',undefined,item.action==='conflict'?'notice error':'account-diff')
       section.append(el('strong',t`${item.slug} · ${actions[item.action]}`))
       const table=el('div',undefined,'comparison-grid')
-      table.append(el('div',t`Ducoro 当前权限\n${policy(item.current)}`),el('div',t`Magpie 期望 / 撤销后恢复\n${item.action==='unmanaged'?t('保持当前权限'):policy(item.desired)}`))
+      table.append(el('div',t`上次同步权限\n${item.applied===undefined?t('尚无记录'):policy(item.applied)}`),el('div',t`Ducoro 当前权限\n${policy(item.current)}`),el('div',t`Magpie 期望 / 撤销后恢复\n${item.action==='unmanaged'?t('保持当前权限'):policy(item.desired)}`))
       section.append(table)
       if(item.reason)section.append(el('p',t(item.reasonMessage??item.reason)))
       if(item.action==='conflict'&&onResolve)for(const [mode,title] of [['keep',t('采用 Ducoro 当前权限')],['reapply',t('重新应用 Magpie 权限')]]){

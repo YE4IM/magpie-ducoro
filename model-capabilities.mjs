@@ -87,7 +87,7 @@ export function resolveCapabilityMappings({
 }) {
   if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)
     || Object.values(overrides).some(value => value !== null && !text(value))) throw Error('modelCapabilityRefs must map route IDs to catalog references or null')
-  if (!Array.isArray(officialProviders) || !officialProviders.length || officialProviders.some(provider => !text(provider))) throw Error('officialProviders must be a non-empty list of catalog provider IDs')
+  if (!Array.isArray(officialProviders) || officialProviders.some(provider => !text(provider))) throw Error('officialProviders must be a list of catalog provider IDs')
   const index = modelIndex(exported, providers, pluginProviders)
   const groups = new Map((Array.isArray(providers?.groups) ? providers.groups : [])
     .filter(group => text(group?.id)).map(group => [`group/${group.id}`, group]))
@@ -101,21 +101,26 @@ export function resolveCapabilityMappings({
   const catalogEntry = ref => cat?.find(c => coordinate(c) === ref)
   const candidatesFor = identity => identity ? (cat ?? []).filter(c =>
     (identityOf(c.id) ?? identityOf(c.name)) === identity) : []
+  const resolvedGroups=new Map();let edges=0;
   const expand = (id, stack = new Set()) => {
+    if(stack.size>128 || edges>100000 || groups.size>10000)return {members:[],error:"group-limit"};
+    if(resolvedGroups.has(id))return resolvedGroups.get(id);
     if (!id.startsWith('group/')) return { members: [id] }
     if (stack.has(id)) return { members: [], error: 'cyclic-group' }
     const group = groups.get(id)
     // Exported group names alone cannot prove homogeneous membership.
-    if (!group || !Array.isArray(group.members) || !group.members.length) return { members: [], error: 'membership-unavailable' }
-    const next = new Set([...stack, id]), members = []
-    for (const member of group.members) {
+    const groupMembers=group?.members;
+    if (!group || !Array.isArray(groupMembers) || !groupMembers.length) return { members: [], error: 'membership-unavailable' }
+    const next = new Set([...stack, id]), members = new Set()
+    for (const member of groupMembers) {
+      edges++;
       const memberId = typeof member === 'string' ? text(member) : text(member?.id)
       if (!memberId || !memberId.includes('/')) return { members: [], error: 'invalid-member' }
       const resolved = expand(memberId, next)
       if (resolved.error) return resolved
-      members.push(...resolved.members)
+      for(const member of resolved.members){members.add(member);if(members.size>100000)return {members:[],error:'group-limit'}}
     }
-    return { members: [...new Set(members)].sort() }
+    const result={ members: [...new Set(members)].sort() };resolvedGroups.set(id,result);return result
   }
   for (const id of [...new Set(ids)]) {
     // Recover pending writes per route: an operator may have edited one entry

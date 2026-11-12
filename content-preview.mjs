@@ -1,3 +1,5 @@
+import {within} from './path-safety.mjs';
+import {validateLibrary} from './library-schema.mjs';
 import { defHash, totalTargets } from './resource-fingerprint.mjs';
 import { readCachedFile } from "./file-cache.mjs";
 // Read-only fingerprints. No resource body, credentials, or local paths leave this module.
@@ -10,17 +12,18 @@ const { message } = globalThis.DucoroI18n;
 const digest = text => createHash('sha256').update(text).digest('hex');
 export async function skillFingerprint(source, { includeModes = true, modeMask = 0o777 } = {}) {
   const root = await realpath(source), files = [];
+  let totalSize=0;
   const walk = async (dir, rel = '', parents = new Set()) => {
     const target = await realpath(dir);
-    if ((target !== root && !target.startsWith(root + '/')) || parents.has(target)) throw Error('unsafe bundle');
+    if (!within(root,target) || parents.has(target)) throw Error('unsafe bundle');
     const ancestors = new Set([...parents, target]);
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (['.git', '.DS_Store'].includes(entry.name)) continue;
       const path = join(dir, entry.name), resolved = await realpath(path);
-      if (resolved !== root && !resolved.startsWith(root + '/')) throw Error('unsafe bundle');
+      if (!within(root,resolved)) throw Error('unsafe bundle');
       const info = await stat(path), name = rel ? `${rel}/${entry.name}` : entry.name;
       if (info.isDirectory()) await walk(path, name, ancestors);
-      else if (info.isFile()) files.push({ name, path, mode: info.mode & 0o777 });
+      else if (info.isFile()) { totalSize+=info.size;if(totalSize>32*1024*1024)throw Error('bundle too large');files.push({ name, path, mode: info.mode & 0o777 }); }
       else throw Error('unsupported bundle');
       if (files.length > 5000) throw Error('bundle too large');
     }
@@ -44,7 +47,8 @@ export async function skillFingerprint(source, { includeModes = true, modeMask =
 }
 export async function contentChanges({ paths, state, options, bots }) {
   if (!paths?.library) return [];
-  const library = JSON.parse(await readFile(paths.library, 'utf8')), changes = [];
+  const library = validateLibrary(JSON.parse(await readFile(paths.library, 'utf8'))), changes = [];
+  const desiredProfiles=new Set(),desiredFiles=new Set();
   const enabled = x => x && !x.offHere && !x.disabled && x.enabled !== false;
   const fingerprints = new Map();
   for (const record of Object.values(state.skills ?? {})) {
@@ -88,23 +92,27 @@ export async function contentChanges({ paths, state, options, bots }) {
       if (enabled(library.instructions) && library.instructions.agents?.includes('ducoro')) {
         const exported=await readFile(paths.instructions,'utf8');
         const match=/<!-- magpie:begin[^\n]*-->\r?\n([\s\S]*?)<!-- magpie:end -->/.exec(exported);
-        sourceText=(match ? match[1] : exported).trim();
+        if(!match)throw Error('Incomplete instruction export');sourceText=match[1].trim();
       }
       for(const bot of targets) {
+        desiredProfiles.add(bot.id);
         const text=[sourceText,options.botInstructions?.[bot.id]??''].filter(Boolean).join('\n\n').trim();
         const block=text ? `\n\n<!-- magpie-ducoro-total:begin -->\n${text}\n<!-- magpie-ducoro-total:end -->\n` : '';
         if(state.total?.profiles?.[bot.id]?.block!==block)changes.push({scope:bot.id,kind:'instructions',name:'全局指令',action:'update',characterCount:text.length,summary:`指令内容将更新（${text.length} 字符），运行中会话需另行确认`});
       }
-    } catch { changes.push({ scope: 'global', kind: 'instructions', name: '全局指令', action: 'unknown', summary: '指令源文件暂不可读取' }); }
+    } catch { for(const bot of targets)desiredProfiles.add(bot.id); changes.push({ scope: 'global', kind: 'instructions', name: '全局指令', action: 'unknown', summary: '指令源文件暂不可读取' }); }
   }
   if (options.syncSubagents) for (const item of library.subagents ?? []) {
     if (!enabled(item) || !(item.agents?.includes('ducoro') || options.subagentNames?.includes(item.name))) continue;
     for (const bot of targets) {
+      desiredFiles.add(`${bot.id}/${item.name}`);
       try {
         if (state.total?.files?.[`${bot.id}/${item.name}`]?.hash !== digest(renderSubagent(item))) changes.push({ scope: bot.id, kind: 'subagents', name: item.name, action: 'update', summary: '子代理描述或指令内容将更新' });
       } catch { changes.push({ scope: bot.id, kind: 'subagents', name: item.name, action: 'unknown', summary: '子代理定义无法安全映射，需在诊断中处理' }); }
     }
   }
+  for(const id of Object.keys(state.total?.profiles??{}))if(!desiredProfiles.has(id))changes.push({scope:id,kind:'instructions',name:'全局指令',action:'remove',summary:'撤销此 Bot 的托管指令区块'});
+  for(const [id,owned] of Object.entries(state.total?.files??{}))if(!desiredFiles.has(id))changes.push({scope:owned.botId,kind:'subagents',name:owned.name,action:'remove',summary:'撤销此 Bot 的托管子代理文件'});
   for (const change of changes) {
     if (change.kind === 'skills' && change.action === 'update')
       change.summaryMessage = message('技能内容或文件权限变化；将核对 {0} 个文件', [change.fileCount]);

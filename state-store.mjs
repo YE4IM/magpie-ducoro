@@ -10,18 +10,30 @@ const policy = (x) =>
     x.allow.every((v) => typeof v === "string") &&
     Array.isArray(x.deny ?? []) &&
     (x.deny ?? []).every((v) => typeof v === "string"));
+function safeKeys(value) {
+  if(value && typeof value==='object')for(const [key,child] of Object.entries(value)) {
+    if(['__proto__','constructor','prototype'].includes(key))throw Error('管理记录包含保留键');
+    safeKeys(child);
+  }
+}
 export function validateState(raw) {
+  safeKeys(raw);
   if (!object(raw) || ![1, 2].includes(raw.v))
     throw Object.assign(
       Error("管理记录版本未知，请恢复兼容的备份后重新读取。"),
       { code: "state-version" },
     );
+  if(raw.creations!==undefined) {
+    if(!object(raw.creations))throw Error('创建恢复记录损坏');
+    for(const [id,tx] of Object.entries(raw.creations))if(!object(tx)||!['mcp','skills'].includes(tx.kind)||!/^(global|agt-[A-Za-z0-9-]+)$/.test(tx.scope??'')||id!==`${tx.kind}:${tx.scope}:${tx.name}`||typeof tx.name!=='string'||typeof tx.sourceName!=='string'||typeof tx.hash!=='string'||typeof tx.contentHash!=='string'||tx.kind==='skills'&&typeof tx.dir!=='string')throw Error('创建恢复记录损坏');
+  }
   if(raw._journalSeq !== undefined && (!Number.isSafeInteger(raw._journalSeq)||raw._journalSeq<0))throw Error('管理记录序号无效');
   if (raw.operations !== undefined && (!object(raw.operations) || Object.values(raw.operations).some(row =>
     !object(row) || !['running','failed','completed'].includes(row.status) ||
     !['feature','target','resource'].every(key => typeof row[key] === 'string' && row[key].length > 0) ||
     typeof row.revision !== 'string' || !/^[a-f0-9]{64}$/.test(row.revision) ||
-    (row.failureClass!==undefined&&!['temporary','permission','conflict'].includes(row.failureClass)) ||
+    (row.failureClass!==undefined&&!['temporary','permission','conflict','unsupported','corrupt','unknown'].includes(row.failureClass)) ||
+    (row.nextRetryAt!=null && (typeof row.nextRetryAt!=='string'||!Number.isFinite(Date.parse(row.nextRetryAt)))) ||
     !Number.isSafeInteger(row.attempts) || row.attempts < 1 ||
     typeof row.updatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.updatedAt) ||
     !Number.isFinite(Date.parse(row.updatedAt)) ||
@@ -271,6 +283,7 @@ export function saveManagedState(file,state,{paths}={}) {
       changes=delta(entry.state,next);
     }
     if(!changes.length)return;
+    const replay=structuredClone(entry.state);apply(replay,changes);validateState(replay);
     await mkdir(dirname(file),{recursive:true,mode:0o700});
     if(!entry.exists) { await compact(file,entry.state,false);entry=cache.get(file); }
     const seq=(entry.state._journalSeq??0)+1;

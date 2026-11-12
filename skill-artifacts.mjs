@@ -1,3 +1,4 @@
+import {within} from './path-safety.mjs';
 import { mkdir, copyFile, writeFile, chmod, rename, rm, lstat } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +27,7 @@ export function createSkillArtifacts(root, readBundle) {
           await mkdir(staged,{recursive:true,mode:0o700});
           for(const f of bundle.files) {
             const path=resolve(staged,f.name);
-            if(!path.startsWith(resolve(staged)+'/'))throw Error('技能文件路径无效');
+            if(!within(resolve(staged),path,{allowRoot:false}))throw Error('技能文件路径无效');
             await mkdir(dirname(path),{recursive:true});
             if(f.name==='SKILL.md')await writeFile(path,bundle.md);else await copyFile(f.path,path);
             await chmod(path,f.mode);

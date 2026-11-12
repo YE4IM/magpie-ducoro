@@ -104,21 +104,27 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
         if (active && !targets.length) report.errors.push({ resource: 'targets', message: 'No target Bots: bind a Bot to the Magpie connection or configure targetAgents.' })
         let instructionText = ''
         let instructionReady = true
+        let instructionError
         if (instructionOn) {
           try {
             // The Agent export is the official aggregate of named instruction
             // sets, external files and Magpie's marker ownership rules.
             const exported = await readOptional(paths.instructions)
-            if (exported === null) throw Error('Magpie instruction export missing; run magpie library sync')
+            if (exported === null) throw Object.assign(Error('Magpie instruction export missing; run magpie library sync'), {failureClass:'temporary'})
             const match = /<!-- magpie:begin[^\n]*-->\r?\n([\s\S]*?)<!-- magpie:end -->/.exec(exported)
-            if (!match) throw Error('Magpie instruction export incomplete; retaining current instructions')
+            if (!match) throw Object.assign(Error('Magpie instruction export incomplete; retaining current instructions'), {failureClass:'temporary'})
             instructionText = match[1]
-          } catch (e) { instructionReady = false; problem(report, 'instructions', e.message) }
+          } catch (e) { instructionReady = false; instructionError = e; problem(report, 'instructions', e.message) }
         }
         for (const id of new Set([...ids, ...Object.keys(owned.profiles)])) {
           let operation;
           try {
-            if (instructionOn && ids.has(id) && !instructionReady) { await operations?.finish(operation,false); continue }
+            if (instructionOn && ids.has(id) && !instructionReady) {
+              operation = operations ? await operations.begin('total',id,'instructions',{selected:true,instructionReady,instructionText,enabled:opts.syncInstructions,extra:opts.botInstructions?.[id]},['instruction-export']) : true
+              if (operation) await operations?.finish(operation,false,[],instructionError)
+              report.errors.push({resource:`instructions:${id}`,message:instructionError.message})
+              continue
+            }
             const bot = await call(['agent', 'get', id])
             const record = bot?.agent ?? bot
             if (record.id !== id || typeof record.profile !== 'string') throw Error('unrecognized Ducoro Bot record')
@@ -126,7 +132,7 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
             const previous = entry?.pending && record.profile.includes(entry.pending) ? entry.pending : entry?.block
             const next = mergeInstructions(record.profile, previous, opts.syncInstructions && ids.has(id) ? [instructionOn ? instructionText : "", opts.botInstructions?.[id] ?? ""].filter(Boolean).join("\n\n") : '')
             operation = operations ? await operations.begin('total',id,'instructions',{selected:ids.has(id),instructionReady,instructionText,enabled:opts.syncInstructions,extra:opts.botInstructions?.[id]},[],record.profile===next.profile && !entry?.pending && (entry?.block??'')===next.block) : true
-            if (!operation) continue
+            if (!operation) { if(record.profile!==next.profile || entry?.pending || (entry?.block??'')!==next.block)problem(report,`instructions:${id}`,'Instruction change is paused or blocked by a previous failure'); continue }
             if (record.profile !== next.profile) {
               // Save the intended block before the RPC. After a lost response,
               // either the old or new exact block is recognizable on retry.
@@ -176,7 +182,7 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
               const old = owned.files[key]
               if (current !== null && ((await lstat(path)).isSymbolicLink() || !old || ![old.hash, old.pending].includes(hash(current)))) throw Error('subagent file belongs to user or was edited; retained')
               operation = operations ? await operations.begin('total',key.split('/')[0],`subagent:${key}`,content,['local-daemon'],current===content && !old?.pending && old?.hash===hash(content)) : true
-              if (!operation) continue
+              if (!operation) { if(current!==content || old?.pending || old?.hash!==hash(content))problem(report,`subagent:${key}`,'Subagent change is paused or blocked by a previous failure'); continue }
               if (current !== content) {
                 owned.files[key] = { botId, name, hash: old?.hash ?? hash(content), pending: hash(content) }
                 await save()

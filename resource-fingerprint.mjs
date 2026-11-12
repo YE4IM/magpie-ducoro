@@ -23,4 +23,14 @@ export const defHash = (def) => {
   )
 }
 
+// A list entry or redacted transport is never sufficient creation evidence.
+export function readableMcpHash(value) {
+  const server=value?.server??value,t=server?.transport;
+  if(!server||typeof server.slug!=='string'||!t||!['stdio','http','sse'].includes(t.type)||typeof server.name!=='string')throw Error('Incomplete MCP readback');
+  const pairs=value=>Array.isArray(value)?value:Object.entries(value??{});
+  if(t.type==='stdio'&&typeof t.command!=='string'||t.type!=='stdio'&&typeof t.url!=='string')throw Error('Incomplete MCP transport');
+  if(server.redacted||t.redacted)throw Error('Redacted MCP readback');
+  return defHash({name:server.name,transport:t.type,command:t.type==='stdio'?t.command:null,args:t.type==='stdio'?(t.args??[]):null,url:t.type==='stdio'?null:t.url,headers:pairs(t.headers),env:pairs(t.env),disabledTools:server.toolPolicy?.deny??server.disabledTools??[]});
+}
+
 export const totalTargets = (bots, options) => bots.filter(bot => options.targetAgents?.length ? options.targetAgents.includes(bot.id) : (bot.modelPreference?.connectionSlug ?? bot.connectionSlug) === options.connectionSlug);

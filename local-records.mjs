@@ -18,7 +18,7 @@ async function candidates(dir,state,{automatic=false}={}) {
     if(info && (!info.isDirectory()||info.isSymbolicLink()))throw Error('本地记录目录必须是普通目录。');
   }
   if(!automatic)for(const name of await names(join(dir,'state-backups')))if(/^[a-f0-9]{64}\.json$/.test(name)&&!(await backupMetadata(join(dir,'state-backups'),name.slice(0,-5))).retained)rows.push({kind:'备份',relative:'state-backups/'+name});
-  const used=new Set(Object.values(state.skills??{}).flatMap(row=>[row.hash,row.replacement?.previousHash,row.replacement?.nextHash].filter(Boolean)));
+  const used=new Set([...Object.values(state.skills??{}),...Object.values(state.creations??{}).filter(row=>row.kind==='skills')].flatMap(row=>[row.hash,row.replacement?.previousHash,row.replacement?.nextHash].filter(Boolean)));
   const root=join(dir,'skill-artifacts');
   for(const name of await names(root)) {
     if(!/^[a-f0-9]{64}$/.test(name)&&!/^\.prepare-[a-f0-9-]{36}$/.test(name))continue;

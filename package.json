@@ -78,6 +78,8 @@
   },
   "files": [
     "bridge.mjs",
+    "path-safety.mjs",
+    "library-schema.mjs",
     "ducoro.agent.js",
     "assets/",
     "total.mjs",
@@ -105,6 +107,7 @@
     "control-center.mjs",
     "skill-artifacts.mjs",
     "operation-store.mjs",
+    "operation-retries.mjs",
     "local-records.mjs",
     "backup-files.mjs",
     "scripts/compact-state.mjs",
@@ -116,20 +119,18 @@
     "backup-metadata.mjs",
     "scripts/recover-lock.mjs",
     "mcp-update.mjs",
-    "RELEASE-NOTES.md"
+    "RELEASE-NOTES.md",
+    "command-recovery.mjs",
+    "page-http.mjs",
+    "draft-store.mjs",
+    "sync-resources.mjs"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs",
     "state:compact": "node scripts/compact-state.mjs",
-    "lint": "eslint .",
-    "check": "npm run lint",
     "lock:inspect": "node scripts/recover-lock.mjs"
   },
   "bin": {
     "magpie-ducoro-status": "./diagnostics-cli.mjs"
-  },
-  "devDependencies": {
-    "eslint": "^9.39.5",
-    "globals": "^17.14.0"
   }
 }

@@ -39,6 +39,7 @@ const REASONS = {
   'skill-import': ['skills', '技能导入未完成。', '检查技能格式及 Ducoro 可用性，然后等待重试。'],
   'skill-stage': ['skills', '技能暂存或内容校验未完成。', '确认技能源文件稳定且完整，然后等待重试。'],
   'skill-sync': ['skills', '技能同步未完成。', '检查资源库、技能目录和 Ducoro 可用性，然后等待重试。'],
+  'skill-source-conflict': ['skills', '同一目标选中了多个 manifest 同名的技能源，已保留现有技能。', '为该目标仅保留一个同名技能源，或修改来源中的 manifest 名称后重新同步。'],
   'skill-conflict': ['skills', '技能目标已有用户配置，插件保留原内容。', '检查同名技能，保留本地配置或调整目标与名称后重新同步。'],
   'total-sync': [['instructions', 'subagents'], '指令或子代理同步未完成。', '检查目标 Bot、指令导出和子代理定义。'],
   'total-resource': [['instructions', 'subagents'], '指令或子代理需要再次对账。', '检查对应资源和目标 Bot；不支持的字段需要调整。'],

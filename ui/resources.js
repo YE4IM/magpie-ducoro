@@ -572,19 +572,8 @@
       };
       apply.onclick = () => {
         if (!plan) return;
-        for (const id of plan.targets) {
-          if (plan.keys.includes("model")) {
-            if (draft.botModels[plan.source] === undefined) delete draft.botModels[id];
-            else draft.botModels[id] = draft.botModels[plan.source];
-          }
-          for (const key of ["mcp", "skills"]) if (plan.keys.includes(key)) {
-            draft.resourceAssignments[id] ??= {};
-            const value = draft.resourceAssignments[plan.source]?.[key];
-            if (value === undefined) delete draft.resourceAssignments[id][key];
-            else draft.resourceAssignments[id][key] = structuredClone(value);
-          }
-        }
-        render(); notify(); dialog.close();
+        const next=DucoroPlans.copyEffective(DucoroWorkspace.collect(),plan.source,plan.targets,plan.keys,data);
+        DucoroWorkspace.stage(next); dialog.close();
       };
       cancel.onclick = () => dialog.close();
       dialog.append(notice, DucoroBackupFiles.actions(preview,apply,cancel)); dialog.addEventListener("close", () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
@@ -607,7 +596,7 @@
       let cursor=$('assignments').firstElementChild;
       const place=node=>{if(node===cursor)cursor=cursor.nextElementSibling;else $('assignments').insertBefore(node,cursor);};
       for (const bot of data.bots) {
-        const signature=shared+JSON.stringify([bot,draft.botModels?.[bot.id],draft.botPlans?.[bot.id],draft.resourceAssignments?.[bot.id],draft.accountConnectors?.[bot.id],draft.accountResolutions?.[bot.id],comparisons.get(bot.id)]);
+        const signature=shared+JSON.stringify([bot,draft.botModels?.[bot.id],draft.botInstructions?.[bot.id],draft.botPlans?.[bot.id],draft.resourceAssignments?.[bot.id],draft.accountConnectors?.[bot.id],draft.accountResolutions?.[bot.id],comparisons.get(bot.id)]);
         const cached=botCards.get(bot.id);
         if(cached?.signature===signature){place(cached.node);const freshness=cached.node.querySelector('.comparison-freshness');if(freshness&&comparison)DucoroI18n.setText(freshness,t`读取于 ${DucoroI18n.dateTime(comparison.updatedAt,true)}`);updateAccountSummary(bot.id);continue;}
         const card = el("section", undefined, "assignment-row");
@@ -620,7 +609,7 @@
           card.append(el('p', t`继承方案：${draft.botPlansCatalog?.[inherited]?.name ?? inherited}`));
           const reset = el('button', t('清除单项覆盖，跟随方案'));
           reset.type = 'button'; reset.className = 'secondary';
-          reset.onclick = () => { delete draft.botModels[bot.id]; delete draft.resourceAssignments[bot.id]; render(); notify(); };
+          reset.onclick = () => { DucoroWorkspace.stage(DucoroPlans.clearOverrides(DucoroWorkspace.collect(),bot.id)); };
           card.append(reset);
         }
         const grid = el("div", undefined, "resource-grid");

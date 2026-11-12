@@ -1,5 +1,9 @@
 # Ducoro 0.4.5
 
+The F01–F22 audit fixes cover source validation, interrupted creations, credential adoption, verification/removal previews, drafts and bulk actions. Restoring ownership records now pauses automatic synchronization until an explicit manual sync.
+
+This 0.4.5 follow-up adds process-group cleanup and readback after interrupted writes, continued tracking for verification jobs beyond 35 seconds, structured failure categories, and explicit draft corruption errors that preserve the original file. Previews explain configuration sources and compare last-synced, current and desired model/policy values. A task center consolidates attempts, failure categories, retry eligibility and pause/resume controls. Verification distinguishes saved settings, written configuration, readback and session loading. Regression and performance checks were completed before packaging.
+
 0.4.5 improves sync efficiency, protects unfinished edits and strengthens recovery. It reduces repeated reads, unnecessary journal writes and multi-Bot refresh overhead, fixes misleading previews and cold-start failures, and aligns instruction and subagent previews with actual synchronization. Complete plan drafts save automatically, with protection against conflicting edits across pages and undo for bulk changes. Individual Bot resources can be retried, paused or resumed, supported by clearer lock diagnostics, content digests and permission verification. Backups gain names, notes, retention and export, while selective rollback includes related configuration dependencies. Backup import validation and MCP update compatibility are also improved. Chinese and English interfaces preserve drafts and selections, and existing settings and management records carry forward without reconfiguration.
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro. Manage assignments for individual Bots from the plugin page.
@@ -138,11 +142,9 @@ The new plan, progress, drift and checkpoint controls are localized in English a
 
 Persistent drafts use the authenticated local service and are restored only against the same settings baseline. Stop every plugin host before lock recovery, inspect ownership again and use the latest recovery token.
 
-From the source archive, install development dependencies and run static checks. Release folders omit test scripts, screenshots and acceptance-work records.
+The release folder and source archive contain runtime source, required project files and usage documentation. Test scripts, development dependencies and review artifacts are omitted.
 
 ```sh
-npm ci
-npm run check
 npm run lock:inspect -- /absolute/path/to/ducoro-bridge
 # After stopping every host and inspecting again:
 npm run lock:inspect -- /absolute/path/to/ducoro-bridge TOKEN --all-hosts-stopped

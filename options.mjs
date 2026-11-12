@@ -26,7 +26,7 @@ export function validateOptions(options) {
   }
   if (options.modelCapabilityRefs !== undefined) {
     if (!record(options.modelCapabilityRefs)) fail('modelCapabilityRefs', 'object-required')
-    else if (Object.entries(options.modelCapabilityRefs).some(([key, value]) => !nonempty(key) || (value !== null && (!nonempty(value) || !/^[^,=\s]+\/[^,=\s]+$/.test(value))))) fail('modelCapabilityRefs', 'reference-invalid')
+    else if (Object.entries(options.modelCapabilityRefs).some(([key, value]) => !nonempty(key) || ["__proto__","constructor","prototype"].includes(key) || (value !== null && (!nonempty(value) || !/^[^,=\s]+\/[^,=\s]+$/.test(value))))) fail('modelCapabilityRefs', 'reference-invalid')
   }
   if (options.servicePort !== undefined && (!Number.isInteger(options.servicePort) || options.servicePort < 1024 || options.servicePort > 65535)) fail('servicePort', 'port-invalid')
   if (options.modelScope !== undefined && !['global', 'agents'].includes(options.modelScope)) fail('modelScope', 'scope-invalid')

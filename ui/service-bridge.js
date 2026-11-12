@@ -143,7 +143,7 @@
           value?.errorMessage ?? value?.error ?? "读取失败，请重试。",
         );
         throw Object.assign(Error(String(localizedMessage)), {
-          localizedMessage,
+          localizedMessage, code:value?.errorCode, status:response.status,
         });
       }
       return value;
