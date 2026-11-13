@@ -1,0 +1,98 @@
+[
+  {
+    "name": "no runtime errors",
+    "passed": true
+  },
+  {
+    "name": "Bot list precedes collapsed plan editor",
+    "passed": true
+  },
+  {
+    "name": "scope settings start collapsed",
+    "passed": true
+  },
+  {
+    "name": "plan-only edit enables save",
+    "passed": true
+  },
+  {
+    "name": "preview includes pending plan",
+    "passed": true
+  },
+  {
+    "name": "global change excluded from Bot count",
+    "passed": true
+  },
+  {
+    "name": "checkbox has compact dimensions",
+    "passed": true
+  },
+  {
+    "name": "no nested labels",
+    "passed": true
+  },
+  {
+    "name": "plan application discloses all Bot scope impact",
+    "passed": true
+  },
+  {
+    "name": "scope cancel preserves pending editor",
+    "passed": true
+  },
+  {
+    "name": "connector and skill expansion remain independent",
+    "passed": true
+  },
+  {
+    "name": "preview failure explicitly remains unchecked",
+    "passed": true
+  },
+  {
+    "name": "failed conflict check preserves visible Bots",
+    "passed": true
+  },
+  {
+    "name": "preview waiting provides visible cancel",
+    "passed": true
+  },
+  {
+    "name": "cancel preview resolves without saving",
+    "passed": true
+  },
+  {
+    "name": "idle verification does not claim completion",
+    "passed": true
+  },
+  {
+    "name": "persistent restore pause banner",
+    "passed": true
+  },
+  {
+    "name": "read-only management check never retries sync",
+    "passed": true
+  },
+  {
+    "name": "task read failure retains stale notice",
+    "passed": true
+  },
+  {
+    "name": "resource search does not dirty plan",
+    "passed": true
+  },
+  {
+    "name": "no object descriptors leak into text",
+    "passed": true
+  },
+  {
+    "name": "Bot control keeps focus on rebuild",
+    "passed": true
+  },
+  {
+    "name": "empty roster shows explicit empty state",
+    "passed": true
+  },
+  {
+    "name": "long and special Bot names stay literal text",
+    "passed": true
+  }
+]

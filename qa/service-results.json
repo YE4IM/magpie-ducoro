@@ -1,0 +1,6 @@
+{
+  "tests": 2,
+  "passed": 2,
+  "failed": 0,
+  "run": "node --test tests/service.test.mjs"
+}

@@ -10,8 +10,8 @@
     upload.type=clear.type='button';upload.className='secondary';clear.className='secondary danger';
     const openDirectory=el('button',t('打开备份目录'));openDirectory.type='button';openDirectory.className='secondary';openDirectory.id=`${kind}-backup-open`;
     const create=el('button',t('执行备份'));create.type='button';create.className='primary';create.id=`${kind}-backup-create`;
-    toolbar.prepend(create);toolbar.append(openDirectory,upload,clear,input);
-    create.onclick=async()=>{busy(true);create.disabled=true;try{await api('create',{});notice(t('手动备份已创建。'));try{await refresh();}catch{notice(t('操作已完成，请重新读取列表。'));}}catch(error){notice(t(error.localizedMessage??error.message));}finally{busy(false);create.disabled=false;}};
+    const createName=el('input');createName.placeholder='新备份名称（可选）';createName.setAttribute('aria-label','新备份名称');toolbar.prepend(createName,create);toolbar.append(openDirectory,upload,clear,input);
+    create.onclick=async()=>{busy(true);create.disabled=true;try{const result=await api('create',{});const created=result.backup??result.checkpoint??result;if(created?.id&&createName.value.trim())await ducoroApi(`backup-files/${kind}/metadata`,{id:created.id,name:createName.value.trim(),note:'',retained:false});createName.value='';notice(t('手动备份已创建。'));try{await refresh();const rows=[...document.querySelectorAll(kind==='state'?'.backup-row':'#checkpoint-section details')];if(rows[0])DucoroComponents.reveal(rows[0]);}catch{notice(t('操作已完成，请重新读取列表。'));}}catch(error){notice(t(error.localizedMessage??error.message));}finally{busy(false);create.disabled=false;}};
     openDirectory.onclick=async()=>{openDirectory.disabled=true;try{await api('open-directory',{});notice(t('已请求在文件管理器中打开备份目录。'));}catch(error){notice(t(error.localizedMessage??error.message));}finally{openDirectory.disabled=false;}};
     const api=(action,body)=>ducoroApi(`backup-files/${kind}/${action}`,body);
     const busy=value=>{create.disabled=upload.disabled=clear.disabled=value;};
@@ -44,7 +44,7 @@
         const content=await file.text(),preview=await api('import-preview',{content});
         const summary=kind==='state'
           ? t`连接器 ${preview.counts.mcp} 项 · 技能 ${preview.counts.skills} 项 · 账户分配 ${preview.counts.accountConnectors} 个 Bot`
-          : t`检查点时间：${dateTime(preview.createdAt)} · ${preview.changes} 项变更`;
+          : t`检查点时间：${DucoroI18n.render(DucoroI18n.dateTime(preview.createdAt),"zh")} · ${preview.changes} 项变更`;
         confirmDialog(t('导入备份预览'),[el('p',t`文件：${file.name}`),el('p',summary),el('p',t('导入仅加入本地备份列表，不会替换当前管理记录或应用配置。请再从列表预览恢复。'))],t('确认导入'),
           ()=>api('import',{content,token:preview.token}),result=>result.imported?t('备份已导入，请从列表预览恢复。'):t('相同备份已存在，未重复导入。'));
         notice(t('外部备份已校验，请确认导入。'));
@@ -64,8 +64,8 @@
     };
   }
   function details(kind,backup,refresh){
-    const box=el('div'),name=el('input'),note=el('textarea'),retain=el('input'),status=el('p');box.className='backup-details';retain.type='checkbox';retain.checked=!!backup.retained;name.value=backup.name??'';note.value=backup.note??'';
-    for(const [title,input] of [[t('备份名称'),name],[t('备份备注'),note],[t('保留此备份'),retain]]){const label=el('label',title);label.append(input);box.append(label);}
+    const box=el('details'),name=el('input'),note=el('textarea'),retain=el('input'),status=el('p');box.className='backup-details';box.append(el('summary','名称、备注与导出'));retain.type='checkbox';retain.checked=!!backup.retained;name.value=backup.name??'';note.value=backup.note??'';
+    for(const [title,input] of [[t('备份名称'),name],[t('备份备注'),note],[t('保留此备份'),retain]]){const label=el('label',title);if(input===retain)label.className='choice';label.append(input);box.append(label);}
     const save=el('button',t('保存备份信息')),download=el('button',t('导出备份'));save.type=download.type='button';save.className=download.className='secondary';
     save.onclick=async()=>{save.disabled=true;try{await ducoroApi(`backup-files/${kind}/metadata`,{id:backup.id,name:name.value,note:note.value,retained:retain.checked});await refresh();}catch(e){setText(status,e.message);}finally{save.disabled=false;}};
     download.onclick=async()=>{download.disabled=true;try{const result=await ducoroApi(`backup-files/${kind}/export`,{id:backup.id});const url=URL.createObjectURL(new Blob([result.content],{type:'application/json'})),link=el('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setText(status,e.message);}finally{download.disabled=false;}};

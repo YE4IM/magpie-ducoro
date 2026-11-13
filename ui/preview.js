@@ -39,8 +39,9 @@
     if(!row.resources.length&&!row.accounts.length&&!row.model)block.append(el('p',t('没有分配范围变化。'),'muted'))
     return block
   }
-  async function show(options,{save=false}={}) {
-    const data=await ducoroApi('preview',options)
+  async function show(options,{save=false,resume=false}={}) {
+    const controller=new AbortController(),waiting=el('dialog',undefined,'preview-dialog'),cancelWait=el('button','取消等待','secondary');cancelWait.type='button';cancelWait.onclick=()=>{controller.abort();waiting.close();};waiting.addEventListener('cancel',()=>controller.abort());waiting.append(el('h2','正在计算差异'),el('p','正在读取当前配置并计算差异；最长约 45 秒。取消等待只中止读取。'),cancelWait);document.body.append(waiting);waiting.showModal();
+    let data;try{data=await ducoroApi('preview',options,{signal:controller.signal});}catch(error){if(controller.signal.aborted)return false;throw error;}finally{waiting.close();waiting.remove();}
     globalThis.DucoroResources?.showComparison(data)
     return new Promise(resolve=>{
       const dialog=el('dialog',undefined,'preview-dialog');dialog.setAttribute('aria-labelledby','preview-title')
@@ -48,32 +49,38 @@
       dialog.append(title,el('p',t`读取时间：${dateTime(data.updatedAt)}。同步前会再次校验当前状态。`,'muted'))
       const body=el('div',undefined,'preview-body')
       for(const warning of data.warningMessages??data.warnings)body.append(el('p',t(warning),'notice'))
-      if(data.blocked)body.append(el('p',t('请先恢复管理记录或数据来源，再重新预览。同步诊断中可重新读取管理记录。'),'notice error'))
-      const changed = row => ['change','unavailable','unknown'].includes(row.model?.status) || row.accountsUnknown || row.resources.some(x => !['keep','unmanaged'].includes(x.action)) || row.accounts.some(x => !['keep','unmanaged'].includes(x.action));
+      if(data.blocked)body.append(el('p',t('请先恢复管理记录或数据来源，再重新预览。同步状态中可重新读取管理记录。'),'notice error'))
+      const changed = row => definite(row);
       const conflicted = row => row.accountsUnknown || row.accounts.some(x => x.action === 'conflict');
-      const affected = data.rows.filter(changed).length;
+      const definite=row=>row.model?.status==='change'||row.resources.some(x=>['add','update','remove','restore'].includes(x.action)||(x.action==='effective'&&((x.gained?.length??0)+(x.lost?.length??0)>0)))||row.accounts.some(x=>['add','update','remove','restore'].includes(x.action));
+      const unknown=row=>['unknown','unavailable','source-unknown','disconnected'].includes(row.model?.status)||row.accountsUnknown||row.accounts.some(x=>x.action==='conflict')||row.resources.some(x=>x.action==='unknown');
+      const affected = data.rows.filter(row=>row.id!=='global'&&definite(row)).length;
+      dialog.append(el('p',`待核实 Bot：${data.rows.filter(row=>row.id!=='global'&&unknown(row)).length} · 全局资源变化：${data.rows.some(row=>row.id==='global'&&definite(row))?'有':'无'}`));
       dialog.append(el('p',t`受影响 Bot：${affected}`));
       const additions=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>x.action==='add').length,0);
       const removals=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>['remove','restore'].includes(x.action)).length,0);
-      dialog.append(el('p',t`新增：${additions} · 撤销：${removals}`));
+      dialog.append(el('p',t`新增操作项：${additions} · 撤销操作项：${removals}`));
       if(['modelScope','mcpScope','skillsScope'].some(key=>options[key]==='agents'))dialog.append(el('p',t('按 Bot 分配会替换插件的全局分配，请检查所有受影响 Bot。'),'notice'));
       const filter=el('select');
-      for(const [value,label] of [['all','全部'],['changed','只看变化'],['conflict','只看冲突']]) {const option=el('option',t(label));option.value=value;filter.append(option);}
+      for(const [value,label] of [['all','全部'],['changed','只看变化'],['conflict','只看冲突'],['unknown','只看待核实']]) {const option=el('option',t(label));option.value=value;filter.append(option);}
       DucoroI18n.setAttribute(filter,'aria-label',t('筛选变更'));
       dialog.append(filter);
+      filter.value='changed';
       const rendered=[];
       for(const row of data.rows){const node=renderRow(row,(id,item,mode)=>{
         globalThis.DucoroResources.resolveConflict(id,item,mode)
         dialog.close('resolved')
       });rendered.push({row,node});body.append(node);}
-      filter.onchange=()=>{for(const {row,node} of rendered)node.hidden=filter.value==='changed'?!changed(row):filter.value==='conflict'?!conflicted(row):false;};
+      filter.onchange=()=>{for(const {row,node} of rendered)node.hidden=filter.value==='changed'?!changed(row):filter.value==='conflict'?!conflicted(row):filter.value==='unknown'?!unknown(row):false;};
+      filter.onchange();
+      if(!data.rows.some(changed))body.prepend(el('p','没有确定变化；待核实项请查看全部。'));
       const caps=el('details');caps.append(el('summary',t('宿主能力检测')))
       const labels={modelCatalog:t('上游模型目录'),botModelWrite:t('Bot 模型命令'),accountPolicy:t('账户权限读取'),accountAdd:t('账户配备命令'),accountUpdate:t('账户权限更新命令'),accountRemove:t('账户撤销命令'),botMcp:t('按 Bot 连接器'),botSkills:t('按 Bot 技能')}
       for(const [key,value]of Object.entries(data.capabilities))caps.append(el('p',t`${labels[key]??key}：${value==='available'?t('本地命令可用，执行权限仍需同步时核实'):value==='unavailable'?t('当前不可用，其他功能可独立同步'):t('尚未确认')}`))
       body.append(caps);dialog.append(body)
       const footer=el('footer',undefined,'button-group'),cancel=el('button',save?t('返回修改'):t('关闭'),'secondary');cancel.type='button';cancel.addEventListener('click',()=>dialog.close())
       footer.append(cancel)
-      if(save){const confirm=el('button',t('确认保存并同步'),'primary');confirm.type='button';confirm.disabled=!!data.blocked;confirm.addEventListener('click',()=>dialog.close('save'));footer.append(confirm)}
+      if(save||resume){const confirm=el('button',resume?'确认继续同步':t('确认保存并同步'),'primary');confirm.type='button';confirm.disabled=!!data.blocked||(resume&&!data.resumeToken);confirm.addEventListener('click',async()=>{if(resume){confirm.disabled=true;try{await ducoroApi('resume-reviewed',{token:data.resumeToken});}catch(error){body.prepend(el('p',error.message,'notice error'));confirm.disabled=false;return;}}dialog.close('save');});footer.append(confirm)}
       dialog.append(footer)
       dialog.addEventListener('close',()=>{const saved=dialog.returnValue==='save';dialog.remove();resolve(saved)},{once:true})
       document.body.append(dialog);dialog.showModal();cancel.focus()

@@ -3,7 +3,7 @@ const { t } = globalThis.DucoroI18n;
 // Shared pure helpers; classic scripts work in Magpie's opaque-origin sandbox.
 globalThis.DucoroUIReady = (async () => {
 if (globalThis.DucoroLanguageReady) await globalThis.DucoroLanguageReady
-else globalThis.DucoroI18n.applyDocument('en')
+else globalThis.DucoroI18n.applyDocument('zh-CN')
 // Browser-only data helpers. Keep this folder self-contained: Magpie serves
 // only files below page.file's directory to its isolated plugin page.
 const SWITCHES = [
