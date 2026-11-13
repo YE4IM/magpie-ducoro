@@ -4,6 +4,7 @@
 
 ### 中文
 
+- 修复保存栏状态文字偏上，空草稿提示不再占位，状态文字与操作按钮垂直居中对齐。
 - 统一 Magpie 风格的页头、导航、分组设置、控件、状态、备份和弹窗。
 - Bot 摘要支持按需展开，增加条目和方案目标边界；模型、连接器、技能编辑区按行对齐。
 - 开关仅点击图形范围切换，保留键盘操作；优化注释与表单控件对齐。
@@ -12,6 +13,7 @@
 
 ### English
 
+- Vertically center save-bar status text with its action buttons and remove empty draft-status spacing.
 - Unify Magpie-style navigation, grouped settings, controls, status views, backups and dialogs.
 - Add bordered Bot summaries and plan target groups, with aligned resource editors that expand on demand.
 - Limit pointer toggling to switch graphics while retaining keyboard access; align form controls and helper text.

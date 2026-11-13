@@ -314,7 +314,7 @@
     let undoDraft = null;
     let draftWrite=Promise.resolve(),draftTimer,pendingDraft=null,draftTouched=false;
     const draftStatus=document.createElement('span');draftStatus.setAttribute('role','status');
-    if(!panel)$('save-bar').append(draftStatus);
+    if(!panel)$('save-bar').querySelector('.save-status').append(draftStatus);
     const draftSession=panel?null:globalThis.DucoroDrafts.create({api:ducoroApi,onStatus:(status,error)=>DucoroI18n.setText(draftStatus,status==='error'?t(error.localizedMessage??error.message):t(status==='saving'?t('编辑草稿保存中'):t('编辑草稿已自动保存')))});
     const flushDraft=()=>{
       clearTimeout(draftTimer);
@@ -338,7 +338,7 @@
     const restoreButton = document.createElement('button');restoreButton.type='button';DucoroI18n.setText(restoreButton,t('恢复本地草稿'));
     const undoButton = document.createElement('button');undoButton.type='button';DucoroI18n.setText(undoButton,t('撤销最近批量修改'));
     restoreButton.className=undoButton.className='secondary';
-    if(!panel){const menu=node('details',undefined,'save-more'),summary=node('summary',t('更多')),items=node('div',undefined,'save-menu');menu.append(summary,items);items.append($('reload'),$('preview'),restoreButton,undoButton);$('save-bar').querySelector('div').prepend(menu);draftStatus.className='draft-status';}
+    if(!panel){const menu=node('details',undefined,'save-more'),summary=node('summary',t('更多')),items=node('div',undefined,'save-menu');menu.append(summary,items);items.append($('reload'),$('preview'),restoreButton,undoButton);$('save-bar').querySelector('.save-actions').prepend(menu);draftStatus.className='draft-status';}
     restoreButton.onclick=async()=>{try{clearTimeout(draftTimer);if(pendingDraft?.clear)await flushDraft();else pendingDraft=null;await draftWrite.catch(()=>{});const saved=await draftSession.read();if(!saved.options)return message(t('没有可恢复的本地草稿'));
       if(JSON.stringify(saved.base)!==JSON.stringify(project(baseline)))return message(t('配置已变化，旧草稿未恢复'));
       DucoroWorkspace.stage({...collect(),...saved.options});globalThis.DucoroPlanEditor?.restore(saved.editor);}catch(error){message(t(error.localizedMessage??error.message),true);}};
