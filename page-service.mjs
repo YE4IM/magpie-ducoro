@@ -130,6 +130,7 @@ export async function inventory({
         return {
           mcp: selected(value.mcp).map((x) => ({ name: text(x.name) })),
           skills: selected(value.skills).map((x) => ({ name: text(x.name) })),
+          subagents:(value.subagents??[]).filter(x=>!x.disabled&&x.enabled!==false).map(x=>({name:text(x.name)})),
         };
       })
       .catch(() => {
@@ -201,6 +202,7 @@ export async function createPageService({
   };
   let verificationJob = null;
   let inventorySnapshot = null;
+  let resumePreview=null;
   let capabilityFlight = null;
   let capabilityCache = null,
     capabilityTime = 0;
@@ -370,6 +372,22 @@ export async function createPageService({
           }
           return reply(200, verificationJob);
         }
+        if(req.method==='GET'&&path==='api/state-status'){
+          let loaded;try{loaded=await readManagedState(join(stateDir,'state.json'));}catch(error){loaded={status:error.code??'unreadable'};}
+          let review;try{review=JSON.parse(await readFile(join(stateDir,'restore-review.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
+          return reply(200,{pending:!!review,readable:loaded.status==='ready',status:loaded.status,at:review?.at??null});
+        }
+        if(req.method==='POST'&&path==='api/resume-reviewed'){
+          const value=await readJsonBody(req,4096),release=await acquireSyncLock(stateDir);
+          if(!release)return reply(409,{error:'正在同步，请稍后重试。'});
+          try{
+            const review=JSON.parse(await readFile(join(stateDir,'restore-review.json'),'utf8'));
+            const state=(await readManagedState(join(stateDir,'state.json'))).state;
+            if(!resumePreview||value.token!==resumePreview.token||Date.now()-resumePreview.at>120000||resumePreview.options!==revision(projectOptions(options))||resumePreview.state!==revision(state)||review.at!==resumePreview.reviewAt)return reply(409,{error:'记录或配置已变化，请重新预览影响。'});
+            await writeFile(join(stateDir,'restore-review.json'),JSON.stringify({...review,approved:true}),{mode:0o600});resumePreview=null;
+          }finally{await release();}
+          trigger('page-resume-reviewed',0);return reply(200,{queued:true});
+        }
         if (req.method === "GET" && path === "api/inventory") {
           const [data, capabilities] = await Promise.all([
             inventory({
@@ -463,6 +481,7 @@ export async function createPageService({
           trigger('page-retry-failed',0); return reply(200,{queued:true});
         }
         if (req.method === "POST" && path === "api/retry") {
+          try{await readFile(join(stateDir,"restore-review.json"));return reply(409,{error:"恢复后的自动同步已暂停，请先预览影响并继续同步。"});}catch(error){if(error.code!=="ENOENT")throw error;}
           trigger("page-retry", 0);
           return reply(200, { queued: true });
         }
@@ -476,6 +495,7 @@ export async function createPageService({
               error: "设置格式无效，请检查分配和工具权限。",
             });
           if (path === "api/preview") {
+            resumePreview=null;
             const next = globalThis.DucoroPlans.resolve({ ...options, ...value });
             const deadline = Date.now() + 40000;
             const signal = AbortSignal.any([
@@ -489,9 +509,9 @@ export async function createPageService({
             ]);
             if (signal.aborted)
               return reply(503, { error: "预览读取超时，请稍后重试。" });
-            return reply(
-              200,
-              await buildSyncPreview({
+            let reviewBefore;try{reviewBefore=await readFile(join(stateDir,'restore-review.json'),'utf8');}catch(error){if(error.code!=='ENOENT')throw error;}
+            const stateBefore=revision(await readManagedState(join(stateDir,'state.json')).then(x=>x.state).catch(()=>null));
+            const result=await buildSyncPreview({
                 options: next,
                 currentOptions: globalThis.DucoroPlans.resolve(options),
                 sourceOptions: {...options,...value},
@@ -506,8 +526,12 @@ export async function createPageService({
                   1,
                   Math.min(25000, deadline - Date.now() - 500),
                 ),
-              }),
-            );
+              });
+            // Review grants apply only to a successful preview of saved settings.
+            if(!result.blocked && revision(projectOptions({...options,...value}))===revision(projectOptions(options))){
+              try{const review=JSON.parse(await readFile(join(stateDir,'restore-review.json'),'utf8'));const state=(await readManagedState(join(stateDir,'state.json'))).state;if(reviewBefore!==await readFile(join(stateDir,'restore-review.json'),'utf8')||stateBefore!==revision(state))return reply(409,{error:'管理记录已变化，请重新预览。'});resumePreview={token:randomBytes(24).toString('hex'),at:Date.now(),reviewAt:review.at,state:revision(state),options:revision(projectOptions(options))};result.resumeToken=resumePreview.token;}catch(error){if(error.code!=='ENOENT')throw error;}
+            }
+            return reply(200,result);
           }
           return reply(200, { valid: true });
         }
@@ -522,6 +546,7 @@ export async function createPageService({
           "app.js",
           "drafts.js",
           "model.js",
+          "components.js",
           "defaults.js",
           "service-bridge.js",
           "resources.js",

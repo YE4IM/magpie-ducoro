@@ -1,5 +1,29 @@
 # 更新记录 / Changelog
 
+## 0.4.7 — 2026-11-13
+
+### 中文
+
+- 统一 Magpie 风格的页头、导航、分组设置、控件、状态、备份和弹窗。
+- Bot 摘要支持按需展开，增加条目和方案目标边界；模型、连接器、技能编辑区按行对齐。
+- 开关仅点击图形范围切换，保留键盘操作；优化注释与表单控件对齐。
+- 完整支持中英文、动态状态、错误提示、日期及无障碍标签，语言切换保留草稿和焦点。
+- 沿用草稿、预览确认、核验和恢复暂停流程；修复摘要加载及错误提示问题。
+
+### English
+
+- Unify Magpie-style navigation, grouped settings, controls, status views, backups and dialogs.
+- Add bordered Bot summaries and plan target groups, with aligned resource editors that expand on demand.
+- Limit pointer toggling to switch graphics while retaining keyboard access; align form controls and helper text.
+- Support English and Chinese across dynamic states, errors, dates and accessible labels without losing drafts or focus.
+- Preserve draft, preview, verification and restore-review workflows; fix summary loading and error feedback.
+
+## 0.4.6 — 2026-11-13
+
+- 完善方案草稿保存、差异检查、变化计数与核验状态。
+- 恢复管理记录后保持自动同步暂停，要求先预览影响再明确继续。
+- 改进错误定位、键盘焦点、资源搜索和备份摘要。
+
 ## 0.4.5 — 2026-11-12
 
 ## 中文

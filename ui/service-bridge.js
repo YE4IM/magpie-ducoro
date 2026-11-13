@@ -21,7 +21,7 @@
         globalThis.DucoroLanguageInitialized &&
         typeof value.lang === "string"
       )
-        globalThis.DucoroI18n.applyDocument(value.lang);
+        globalThis.DucoroI18n.applyDocument(value.lang ?? navigator.language);
       document.documentElement.style.colorScheme = value.dark
         ? "dark"
         : "light";
@@ -35,7 +35,7 @@
     addEventListener("message", (event) => {
       if (event.source !== parent || event.data?.magpie !== 1) return;
       const m = event.data;
-      if (m.event === "theme") theme(m.data);
+      if (m.event === "theme") {theme(m.data);globalThis.DucoroComponents?.updateAccent();}
       if (m.event === "action") {
         if (handlers.size) for (const fn of handlers) fn(m.data);
         else actions.push(m.data);
@@ -69,12 +69,12 @@
           )
         : Promise.resolve();
     globalThis.DucoroLanguageReady = Promise.all([
-      magpie.ready.catch(() => ({ lang: "en" })),
+      magpie.ready.catch(() => ({ lang: navigator.language })),
       domReady,
     ]).then(([value]) => {
       // Resolve the initial host language before controls are built. Later theme
       // events update text bindings without rebuilding controls or losing drafts.
-      globalThis.DucoroI18n.applyDocument(value.lang);
+      globalThis.DucoroI18n.applyDocument(value.lang ?? navigator.language);
       globalThis.DucoroLanguageInitialized = true;
     });
     globalThis.ducoroApi = async (path, body, { signal, inventoryToken } = {}) => {
@@ -140,7 +140,7 @@
       }
       if (!response.ok) {
         const localizedMessage = t(
-          value?.errorMessage ?? value?.error ?? "读取失败，请重试。",
+          value?.errorMessage ?? value?.error ?? t("读取失败，请重试。"),
         );
         throw Object.assign(Error(String(localizedMessage)), {
           localizedMessage, code:value?.errorCode, status:response.status,

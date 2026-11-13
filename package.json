@@ -1,6 +1,6 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.4.5",
+  "version": "0.4.7",
   "description": "Sync Magpie models, connectors, skills and instructions with Ducoro.",
   "type": "module",
   "main": "./bridge.mjs",
@@ -68,7 +68,8 @@
       "title": "Ducoro",
       "file": "ui/launch.html",
       "titles": {
-        "zh": "Ducoro"
+        "zh": "Ducoro",
+        "en": "Ducoro"
       },
       "service": {
         "port": 3487,
@@ -123,7 +124,8 @@
     "command-recovery.mjs",
     "page-http.mjs",
     "draft-store.mjs",
-    "sync-resources.mjs"
+    "sync-resources.mjs",
+    "README.md"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs",

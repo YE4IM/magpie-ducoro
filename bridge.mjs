@@ -406,7 +406,7 @@ const createEngine = (input = {}, options = {}) => {
   }
 
   const reportCapabilities = async (plan, applied) => {
-    capabilitiesForRound = { applied, entries: plan.entries }
+    capabilitiesForRound = { applied, entries: plan.entries, updatedAt:new Date().toISOString(), roundId:diagnostics.token() }
     for (const entry of plan.entries) {
       if (entry.status !== "matched" || entry.warnings.length) warnOnce(
         `capability:${JSON.stringify(entry)}`,
@@ -1330,7 +1330,6 @@ const createEngine = (input = {}, options = {}) => {
   // Magpie CLI commands start their own plugin hosts while the app's host
   // stays alive. Serialize their writes and reload ownership each round so
   // an older host cannot overwrite another host's newly imported skills.
-  let resumeReview=false
   let syncing = false
   const syncAll = async (reason = "tick") => {
     if (stopped) return false
@@ -1346,10 +1345,10 @@ const createEngine = (input = {}, options = {}) => {
       }
       const reviewFile=join(stateDir,'restore-review.json');
       try {
-        await readFile(reviewFile);
-        if(reason!=='page-retry' && reason!=='manual' && !resumeReview) { log('Restored management records await preview and manual synchronization'); return true }
-        await rm(reviewFile);resumeReview=false;
-      } catch(error) { if(error.code!=='ENOENT')throw error } finally {resumeReview=false}
+        const review=JSON.parse(await readFile(reviewFile,'utf8'));
+        if(!review.approved) { log('Restored management records await preview and manual synchronization'); return true }
+        await rm(reviewFile);
+      } catch(error) { if(error.code!=='ENOENT')throw error }
       const changes = dirtyFeatures; dirtyFeatures = new Set()
       const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
       roundFeatures = (reason.startsWith('retry:') || ['file-change','coalesced','page-retry-failed'].includes(reason) || reason.startsWith('page-operation:')) && changes.size && !changes.has('all') ? changes : null
@@ -1447,7 +1446,6 @@ const createEngine = (input = {}, options = {}) => {
   // writes cannot postpone a user's selection indefinitely.
   const trigger = (reason = "file-change", delay = 75) => {
     if (!watching) return
-    if(reason==='page-retry')resumeReview=true
     if(reason.startsWith('page-operation:')) {
       if(!manualRetries.add(reason))return
       dirtyFeatures.add(reason.split(':')[2])
@@ -1585,7 +1583,7 @@ const createEngine = (input = {}, options = {}) => {
     if (!dryRun) await removeLegacyReports(stateDir)
     if (!dryRun) pageService = await createPageService({ options: rawOptions, paths, stateDir, run, trigger, getProgress: () => progress.read(),
     getReport: () => diagnostics.read({ syncing, watchDegraded }),
-      getModelCatalog: async force => ({ ...(await capabilityCatalog.snapshot(force)), entries: (capabilitiesForRound?.entries ?? []).map(({id,status,source,reference,commonCapabilities,warnings}) => ({id,status,source,reference,commonCapabilities,warnings})) }), log })
+      getModelCatalog: async force => ({ ...(await capabilityCatalog.snapshot(force)), entriesUpdatedAt:capabilitiesForRound?.updatedAt??null, entriesRoundId:capabilitiesForRound?.roundId??null, syncing, entries: (capabilitiesForRound?.entries ?? []).map(({id,status,source,reference,commonCapabilities,warnings}) => ({id,status,source,reference,commonCapabilities,warnings})) }), log })
     await refreshWatches()
     if (!watching || generation !== lifecycleGeneration) return
     trigger("startup", 0)

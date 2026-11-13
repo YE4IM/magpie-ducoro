@@ -3,8 +3,10 @@ const { t } = globalThis.DucoroI18n;
 (async () => {
   const open = async () => {
     try {
-      const theme = await magpie.ready
-      globalThis.DucoroI18n.applyDocument(theme.lang)
+      DucoroI18n.setText(document.getElementById("launch-state"),t("正在连接 Magpie 页面接口…"));
+      const theme = await Promise.race([magpie.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error(t("连接超时"))),10000))])
+      globalThis.DucoroI18n.applyDocument(theme?.lang ?? navigator.language)
+      DucoroI18n.setText(document.getElementById("launch-state"),t("正在读取插件配置并打开控制台…"));
       const options = await magpie.options.get() ?? {}
       const port = Number(options.servicePort) || 3487
       location.replace(magpie.service ? new URL(magpie.service, location.href).href : `http://127.0.0.1:${port}/`)

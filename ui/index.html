@@ -10,6 +10,7 @@
   <script src="service-bridge.js"></script>
   <script src="plans.js" defer></script>
   <script src="defaults.js"></script>
+<script src="components.js" defer></script>
 <script src="model.js" defer></script>
   <script src="preview.js" defer></script>
   <script src="resources.js" defer></script>
@@ -24,27 +25,29 @@
 <body>
   <main class="console">
     <header class="hero">
-      <div class="brand"><img src="ducoro.svg" width="42" height="42" alt=""><div><h1>Ducoro <span class="version">0.4.5</span></h1></div></div>
+      <div class="brand"><img src="ducoro.svg" width="24" height="24" alt=""><div><h1>Ducoro <span class="version">0.4.7</span></h1></div></div>
       <p>在一处管理连接、同步范围和每个 Bot 的资源。</p>
       <div class="connection-note"><span class="dot" aria-hidden="true"></span><span id="connection-state">正在读取插件配置…</span></div>
     </header>
     <nav class="tabs" aria-label="控制台页面">
       <button type="button" class="tab active" data-tab="settings" aria-pressed="true">同步设置</button>
       <button type="button" class="tab" data-tab="resources" aria-pressed="false">Bot 资源</button>
-      <button type="button" class="tab" data-tab="diagnostics" aria-pressed="false">同步诊断</button>
-      <button type="button" class="tab" data-tab="backups" aria-pressed="false">备份管理</button>
+      <button type="button" class="tab" data-tab="diagnostics" aria-pressed="false">同步状态</button>
+      <button type="button" class="tab" data-tab="backups" aria-pressed="false">备份与恢复</button>
     </nav>
+    <section id="restore-banner" class="notice" hidden><strong>已恢复管理记录，自动同步暂停</strong><p>请先预览影响，再明确继续同步。</p><button type="button" id="resume-review" class="secondary">预览影响并继续同步</button><p id="restore-message" role="status"></p></section>
     <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
     <section id="settings" class="tab-content">
       <div class="section-title"><div><h2>同步哪些内容</h2><p>保存后由插件自动对账，运行中的会话可能需要重新加载资源。</p></div><span class="pill">配置</span></div>
-      <div id="switches" class="switch-grid"></div>
+      <div id="switches" class="switch-grid" role="group" aria-label="同步内容"></div>
       <section class="card">
         <h2>连接与目标</h2>
-        <div class="field-grid">
-          <label>连接标识<input id="connectionSlug" autocomplete="off" spellcheck="false" placeholder="magpie-ducoro"><small>已有连接请保持原标识，避免另建连接。</small></label>
-          <div class="field"><span class="field-title">断开连接后</span><label class="toggle-control"><span><strong>移除网关连接</strong><small id="disconnect-state">关闭时保留网关连接</small></span><input id="onDisconnect" type="checkbox" role="switch" aria-label="断开连接后移除插件拥有的网关连接"></label><small>仅移除插件拥有的连接；资源分配按各自范围同步。</small></div>
+        <div class="field-grid connection-fields">
+          <div class="connection-field"><label for="connectionSlug">连接标识</label><div class="connection-control"><input id="connectionSlug" aria-describedby="connection-help" autocomplete="off" spellcheck="false" placeholder="magpie-ducoro"></div><small id="connection-help">已有连接请保持原标识，避免另建连接。</small></div>
+          <div class="connection-field"><span class="field-title">断开连接后</span><div class="connection-control toggle-control"><span><strong>移除网关连接</strong><small id="disconnect-state">关闭时保留网关连接</small></span><input id="onDisconnect" type="checkbox" role="switch" aria-describedby="disconnect-help" aria-label="断开连接后移除插件拥有的网关连接"></div><small id="disconnect-help">仅移除插件拥有的连接；资源分配按各自范围同步。</small></div>
         </div>
-        <label>选择的子代理名称<textarea id="subagentNames" rows="2" spellcheck="false" placeholder="reviewer&#10;researcher"></textarea><small>仅同步显式选择的子代理；现有模型与工具限制仍适用。</small></label>
+        <label>目标 Bot（留空表示全部符合条件的 Bot）<textarea id="targetAgents" rows="2" spellcheck="false" placeholder="agt-…"></textarea><small>仅影响模型、指令与子代理的目标范围；也可从下方名册选择。</small></label><div id="target-picker" class="choices"></div>
+        <label>选择的子代理名称<textarea id="subagentNames" rows="2" spellcheck="false" placeholder="reviewer&#10;researcher"></textarea><small>仅同步显式选择的子代理；现有模型与工具限制仍适用。</small></label><div id="subagent-picker" class="choices"></div>
       </section>
       <section class="card">
         <div class="card-heading"><div><h2>模型能力参考</h2><p>优先使用 Ducoro 上游目录自动匹配，特殊需求再手动指定。</p></div><button type="button" id="sync-catalog" class="secondary">↻ 同步上游模型列表</button></div>
@@ -55,7 +58,7 @@
           <label class="search-field"><span class="sr-only">搜索上游模型</span><input id="catalog-search" type="search" placeholder="搜索模型名称或供应商" autocomplete="off"></label>
           <p id="catalog-count" class="muted"></p><div id="catalog-list" class="catalog-list"></div>
         </details>
-        <details><summary>模型匹配依据与能力差异</summary><p>自动匹配先识别模型身份，再按官方供应商优先顺序选择参考；手动指定优先于自动匹配。参考只描述能力，不改变请求路由。</p><div id="model-explanations">正在读取匹配记录…</div></details>
+        <details><summary>模型匹配依据与能力差异</summary><p>自动匹配先识别模型身份，再按官方供应商优先顺序选择参考；手动指定优先于自动匹配。参考只描述能力，不改变请求路由。</p><button type="button" id="read-matches" class="secondary">重新读取匹配记录</button><p id="match-context" role="status"></p><div id="model-explanations">正在读取匹配记录…</div></details>
         <datalist id="catalog-options"></datalist>
         <details class="manual-settings"><summary>手动指定能力参考 <span id="manual-count" class="summary-count">0 项覆盖</span></summary>
           <div class="card-heading manual-heading"><p>手动指定优先于自动匹配；移除映射即可恢复跟随上游。</p><button type="button" id="add-reference" class="secondary">＋ 添加映射</button></div>
@@ -66,34 +69,34 @@
       </section>
     </section>
     <section id="resources" class="tab-content" hidden>
-      <div class="section-title"><div><h2>让每个 Bot 各取所需</h2><p>选择同步方式，再为各个 Bot 分配模型、连接器和技能。</p></div><span class="pill">按需分配</span></div>
+      <div class="section-title"><div><h2>Bot 资源分配</h2><p>摘要显示当前模型与计划分配；展开编辑后预览保存。</p></div><span class="pill">按需分配</span></div>
       <section class="card">
         <div class="resource-grid scope-grid">
-          <div class="scope-field"><span class="field-title">模型作用域</span><label class="toggle-control"><span><strong>按 Bot 分配</strong><small id="modelScope-state">当前为全局同步</small></span><input id="modelScope" type="checkbox" role="switch" aria-label="模型按 Bot 分配"></label><small>关闭时跟随 Magpie 所选模型。</small></div>
-          <div class="scope-field"><span class="field-title">连接器作用域</span><label class="toggle-control"><span><strong>按 Bot 分配</strong><small id="mcpScope-state">当前为全局同步</small></span><input id="mcpScope" type="checkbox" role="switch" aria-label="连接器按 Bot 分配"></label><small>适用于 Magpie 来源；Ducoro 账户连接器始终按 Bot 配备。</small></div>
-          <div class="scope-field"><span class="field-title">技能作用域</span><label class="toggle-control"><span><strong>按 Bot 分配</strong><small id="skillsScope-state">当前为全局同步</small></span><input id="skillsScope" type="checkbox" role="switch" aria-label="技能按 Bot 分配"></label><small>关闭时跟随资源库勾选，开启后可为 Bot 单独选择。</small></div>
+          <div class="scope-field"><span class="field-title">模型作用域</span><div class="toggle-control"><span><strong>按 Bot 分配</strong><small id="modelScope-state">当前为全局同步</small></span><input id="modelScope" type="checkbox" role="switch" aria-label="模型按 Bot 分配"></div><small>关闭时跟随 Magpie 所选模型。</small></div>
+          <div class="scope-field"><span class="field-title">连接器作用域</span><div class="toggle-control"><span><strong>按 Bot 分配</strong><small id="mcpScope-state">当前为全局同步</small></span><input id="mcpScope" type="checkbox" role="switch" aria-label="连接器按 Bot 分配"></div><small>适用于 Magpie 来源；Ducoro 账户连接器始终按 Bot 配备。</small></div>
+          <div class="scope-field"><span class="field-title">技能作用域</span><div class="toggle-control"><span><strong>按 Bot 分配</strong><small id="skillsScope-state">当前为全局同步</small></span><input id="skillsScope" type="checkbox" role="switch" aria-label="技能按 Bot 分配"></div><small>关闭时跟随资源库勾选，开启后可为 Bot 单独选择。</small></div>
         </div>
         <div class="info-box">单独分配可选择继承、指定资源或不分配。本页仅撤销插件管理的分配，其他全局资源和用户自行配置的资源仍可能生效。</div>
       </section>
       <section class="card">
-        <div class="card-heading"><div><h2>Bot 列表</h2><p id="inventory-state">正在读取 Ducoro Bot 和资源…</p></div><button type="button" id="refresh-bots" class="secondary">刷新列表</button></div>
+        <div class="card-heading"><div><h2>Bot 列表</h2></div><button type="button" id="refresh-bots" class="secondary">刷新列表</button></div>
         <div id="inventory-message" class="notice" role="status" hidden></div>
-        <div class="bot-toolbar"><label>搜索 Bot<input id="bot-search" type="search" placeholder="名称或 Bot ID"></label><label>筛选<select id="bot-filter"><option value="all">全部</option><option value="changed">有修改</option><option value="failed">同步失败 / 待核实</option><option value="conflict">有权限冲突</option><option value="unavailable">模型不可用</option></select></label><button type="button" id="copy-bots" class="secondary">复制与批量分配</button><p id="bot-count" role="status"></p></div>
+        <div class="bot-toolbar"><label>搜索 Bot<input id="bot-search" type="search" placeholder="名称或 Bot ID"></label><label>筛选<select id="bot-filter"><option value="all">全部</option><option value="changed">有单项草稿</option><option value="failed">同步失败 / 待核实</option><option value="conflict">有权限冲突</option><option value="unavailable">模型不可用</option></select></label><button type="button" id="copy-bots" class="secondary">复制与批量分配</button></div>
+        <div class="bot-status-line"><div><p id="bot-count" role="status"></p><p id="comparison-state" role="status"></p><details class="inventory-details"><summary>读取详情</summary><p id="inventory-state">正在读取 Ducoro Bot 和资源…</p></details></div><button id="check-comparison" type="button" class="secondary">重新检查差异</button></div><p id="filter-empty" hidden></p>
         <div id="assignments" class="rows"></div>
         <div id="assignment-empty" class="empty-state" hidden><span class="empty-icon" aria-hidden="true">◇</span><h3>尚无 Bot</h3><p>在 Ducoro 中创建 Bot 后刷新列表。</p></div>
       </section>
     </section>
-    <section id="diagnostics" class="tab-content" hidden>
-      <div class="section-title"><div><h2>同步结果，一目了然</h2><p>每次查看生成当前报告，或重试同步后再次查看。</p></div><span class="pill">实时诊断</span></div>
-      <section class="card"><div class="card-heading"><div><h2>当前同步结果</h2><p>报告按需生成，仅在当前页面显示，不保存文件或累积历史。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div></section>
+    <section id="diagnostics" class="tab-content" hidden><p id="diagnostic-summary" class="notice">尚未读取同步状态。配置一致、读回核验与会话加载分别确认。</p>
+      <div class="section-title report-toolbar"><div><h2>同步状态</h2><p>按需生成当前报告。</p></div><div class="button-group"><button type="button" id="refresh-report" class="secondary">重新查看报告</button><button type="button" id="retry-sync" class="secondary">重试同步</button></div></div>
       <section class="card"><h2>管理记录状态与重读</h2><p>若 state.json 无法读取、损坏或版本未知，插件会暂停同步并保留原件。请检查文件权限，或恢复原有有效备份后重新读取；不要删除或清空管理记录，以免丢失权限恢复信息。</p><button type="button" id="retry-state" class="secondary">重新读取管理记录</button><p id="state-message" role="status"></p></section>
       <section class="card"><div class="card-heading"><h2>逐项结果核验</h2><button type="button" id="verify-results" class="secondary">重新读取并核验</button></div><p>配置核验成功不代表运行中的会话已加载。超时后先读取核验，再决定是否重试。</p><div id="verification-results" role="status">尚未核验</div></section>
-      <div id="report-message" class="notice" role="status" aria-live="polite" hidden></div>
-      <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步诊断或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
+      <div id="report-message" class="report-status" role="status" aria-live="polite" hidden></div>
+      <section id="report-empty" class="card empty-state"><span class="empty-icon" aria-hidden="true">◎</span><h3>等待查看实时报告</h3><p>打开同步状态或点击「重新查看报告」时生成。</p><p class="muted">如暂时连接失败，请稍后重试；无需导入报告文件。</p></section>
       <section id="report-view" hidden>
         <div class="report-meta"><span id="report-time"></span><span class="pill">按需生成 · 不保存</span></div>
-        <div id="report-cards" class="report-grid"></div>
-        <section class="card"><h2>需要关注</h2><div id="report-issues"></div></section>
+        <section class="card attention-panel"><h2>需要关注</h2><div id="report-issues"></div></section>
+        <details class="card feature-report"><summary>各项同步结果</summary><div id="report-cards" class="report-grid"></div></details>
         <p class="footnote">报告说明配置层的同步情况。除非报告明确验证，否则不代表运行中的会话已加载新的工具、技能或子代理。</p>
       </section>
     </section>
@@ -103,7 +106,7 @@
 <div id="checkpoint-section"></div>
       <section class="card"><h2>本地存储维护</h2><p>清理已完成的操作历史、历史备份和未使用的技能缓存，合并增量记录。保留当前配置、未完成任务和正在使用的技能。</p><button type="button" id="clean-local-records" class="secondary">清理本地记录</button><div id="local-records-results" role="status"></div></section>
     </section>
-    <footer id="save-bar" class="save-bar"><span id="dirty-state">正在加载…</span><div><button type="button" id="reload" class="secondary" disabled>重新读取</button><button type="button" id="preview" class="secondary" disabled>预览变化</button><button type="button" id="save" class="primary" disabled>保存设置</button></div></footer>
+    <footer id="save-bar" class="save-bar"><span id="dirty-state">正在加载…</span><div><button type="button" id="reload" class="secondary" disabled>重新读取</button><button type="button" id="preview" class="secondary" disabled>预览变化</button><button type="button" id="save" class="primary" disabled>预览并保存</button></div></footer>
   </main>
 </body>
 </html>
