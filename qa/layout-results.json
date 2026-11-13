@@ -1,0 +1,47 @@
+[
+  {
+    "width": 390,
+    "scrollWidth": 390,
+    "savebar": 58,
+    "botTitle": "让每个 Bot 各取所需"
+  },
+  {
+    "width": 768,
+    "scrollWidth": 768,
+    "savebar": 65.09375,
+    "botTitle": "让每个 Bot 各取所需"
+  },
+  {
+    "width": 1024,
+    "scrollWidth": 1024,
+    "savebar": 65.09375,
+    "botTitle": "让每个 Bot 各取所需"
+  },
+  {
+    "width": 1440,
+    "scrollWidth": 1440,
+    "savebar": 65.09375,
+    "botTitle": "让每个 Bot 各取所需"
+  },
+  {
+    "width": 720,
+    "scrollWidth": 720,
+    "savebar": 65.09375,
+    "botTitle": "让每个 Bot 各取所需"
+  },
+  {
+    "theme": "light",
+    "contrast": 6.184891244714118,
+    "foreground": "rgb(255, 255, 255)",
+    "background": "rgb(53, 107, 88)"
+  },
+  {
+    "theme": "dark",
+    "contrast": 5.7048358616102055,
+    "foreground": "rgb(16, 24, 32)",
+    "background": "rgb(93, 158, 133)"
+  },
+  {
+    "hostAccent": "rgb(255, 255, 255)"
+  }
+]
