@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Ducoro 0.4.3
 
 Version 0.4.3 focuses on sync efficiency, reliability, and backup management. Shared skill caching, deduplicated reads, incremental saves, and per-target retries reduce repeated work and disk writes when syncing multiple Bots, while stronger cancellation, timeout handling, and recovery improve resilience. A centralized backup page brings together management-record backups and configuration checkpoints, with external backup import, restore previews, selective configuration rollback, and local record cleanup. This release also refines sync diagnostics, English and Chinese interfaces, and narrow-screen layouts, and fixes diagnostic state being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
