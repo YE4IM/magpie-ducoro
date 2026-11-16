@@ -137,6 +137,7 @@ export async function buildSyncPreview({
         issue.scope,
         message(issue.kind === "skills" ? "技能" : "连接器"),
       ]);
+    let targetScopeWarned = false;
     for (const kind of ["mcp", "skills"]) {
       const scopes =
         kind === "mcp"
@@ -180,6 +181,12 @@ export async function buildSyncPreview({
             });
       }
       // Global changes affect Bots with no explicit local assignment too.
+      if (!targetScopeWarned && options[kind==='mcp'?'mcpScope':'skillsScope']==='agents' && options.targetAgents?.length && scopes.length &&
+          [...owned.keys()].some(scope => scope !== 'global' && !options.targetAgents.includes(scope) &&
+            (currentOptions.targetAgents?.length ? currentOptions.targetAgents.includes(scope) : true))) {
+        warn('目标范围已缩小：范围外 Bot 的托管资源库连接器或技能将撤销，账户连接器仍按各 Bot 单独配置。');
+        targetScopeWarned = true;
+      }
       const globalBefore = owned.get("global") ?? new Set(),
         globalAfter = wanted.get("global") ?? new Set();
       for (const bot of bots.filter((x) => x.runtime === "pi-agent")) {

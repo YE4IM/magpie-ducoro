@@ -46,7 +46,7 @@
           <div class="connection-field"><label for="connectionSlug">连接标识</label><div class="connection-control"><input id="connectionSlug" aria-describedby="connection-help" autocomplete="off" spellcheck="false" placeholder="magpie-ducoro"></div><small id="connection-help">已有连接请保持原标识，避免另建连接。</small></div>
           <div class="connection-field"><span class="field-title">断开连接后</span><div class="connection-control toggle-control"><span><strong>移除网关连接</strong><small id="disconnect-state">关闭时保留网关连接</small></span><input id="onDisconnect" type="checkbox" role="switch" aria-describedby="disconnect-help" aria-label="断开连接后移除插件拥有的网关连接"></div><small id="disconnect-help">仅移除插件拥有的连接；资源分配按各自范围同步。</small></div>
         </div>
-        <label>目标 Bot（留空表示全部符合条件的 Bot）<textarea id="targetAgents" rows="2" spellcheck="false" placeholder="agt-…"></textarea><small>仅影响模型、指令与子代理的目标范围；也可从下方名册选择。</small></label><div id="target-picker" class="choices"></div>
+        <label>目标 Bot（留空表示全部符合条件的 Bot）<textarea id="targetAgents" rows="2" spellcheck="false" placeholder="agt-…"></textarea><small>影响模型、指令与子代理；按 Bot 分配时也限定资源库连接器和技能，范围外的托管资源会撤销。账户连接器仍按各 Bot 单独配置。</small></label><div id="target-picker" class="choices"></div>
         <label>选择的子代理名称<textarea id="subagentNames" rows="2" spellcheck="false" placeholder="reviewer&#10;researcher"></textarea><small>仅同步显式选择的子代理；现有模型与工具限制仍适用。</small></label><div id="subagent-picker" class="choices"></div>
       </section>
       <section class="card">

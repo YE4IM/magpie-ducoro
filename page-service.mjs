@@ -421,8 +421,7 @@ export async function createPageService({
           if(!release)return reply(409,{error:"正在同步，请完成后再操作备份。"});
           try {
             if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
-            await writeFile(join(stateDir,'restore-review.json'),JSON.stringify({pending:true,at:new Date().toISOString()}),{mode:0o600});
-            await restoreStateBackup(file,id,checksum);
+            await restoreStateBackup(file,id,checksum,{beforeRestore:()=>writeFile(join(stateDir,'restore-review.json'),JSON.stringify({pending:true,at:new Date().toISOString()}),{mode:0o600})});
           } finally {await release();}
           return reply(200,{restored:true});
         }

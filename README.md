@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Ducoro 0.4.7
 
 The 0.4.7 interface supports English and Chinese, follows Magpie language changes, and preserves drafts, focus and open dialogs. It includes grouped settings, bordered Bot summaries and aligned expanded editors. See the [release notes](RELEASE-NOTES.md).
@@ -5,6 +7,8 @@ The 0.4.7 interface supports English and Chinese, follows Magpie language change
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro, and manage per-Bot assignments from the plugin page. Changes go through previews with confirmation before saving; failures are recorded by category with per-item retry; verification distinguishes saved settings, written configuration, readback and session loading.
 
 Full history: [CHANGELOG.md](CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](RELEASE-NOTES.md).
+
+Run `npm test` from the source directory for isolated fix regressions. Tests use temporary files, child processes and a local mock service, without modifying real Bots. Test sources are retained in the source archive and excluded from the npm installation package.
 
 ## Features
 
@@ -15,6 +19,7 @@ Full history: [CHANGELOG.md](CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](
 - **Skills**: assigned per Bot from Magpie resources already allocated to Ducoro; skill artifacts with the same name and content digest are prepared once and reused. Skill bundles are bounded by file count (5000) and total size (32 MiB).
 - **Instructions and subagents**: instructions are appended inside the plugin-owned block, and removal restores the user's original profile; subagents are selected explicitly per target.
 - **Plans**: define a name, model, library connectors, skills and extra instructions under **Manage plans**; multiple Bots inherit continuously and explicit selections take precedence. One click clears per-Bot overrides back to the plan (including instruction overrides). Plan IDs accept 1–64 letters, digits, underscores and hyphens; cancel inheritance before deleting a plan.
+- **Target range**: `targetAgents` applies to models, instructions and subagents. Library connectors and skills in per-Bot mode also use this range; their managed resources outside it are revoked. Account connectors remain configured separately for each Bot.
 
 ### Preview and verification
 
@@ -32,6 +37,8 @@ Full history: [CHANGELOG.md](CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](
 ### Drafts and bulk actions
 
 - Unfinished settings and plan drafts autosave completely through the authenticated local service and are restored against the same settings baseline. Concurrent edits across pages prompt to restore the latest draft instead of silently overwriting; a corrupt draft keeps the original file with guidance.
+- Plan drafts retain model and resource assignment modes; hidden input values do not change the selected mode. Legacy drafts infer missing modes from saved plans. Previously lost editing intent cannot be fully recovered, so review the preview after restoring an old draft.
+- Draft locks recover ownership from processes confirmed to have exited and preserve live owners. Anonymous legacy locks or unverified ownership are never deleted automatically. If prompted, stop all plugin hosts, back up and move `page-draft.lock` and `page-draft-locks` out of the state directory, then reopen the page. Keep `page-draft.json`.
 - Bulk copy stages the source Bot's effective configuration, including inherited plans, into the draft; the latest bulk change can be undone. Account permissions are excluded from bulk copy.
 
 ### Backups and rollback
@@ -39,6 +46,7 @@ Full history: [CHANGELOG.md](CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](
 - **Backup and restore** centralizes management-record backups and configuration checkpoints: create backups, open the backup folder, import external files (8 MiB limit; record imports need a complete v1/v2 snapshot, checkpoint imports accept version 1 records), JSON export and per-collection clearing. Backups support names, notes and retention flags; retained items survive automatic pruning, bulk clearing and local-record cleanup.
 - A configuration checkpoint is created before each save (file mode 0600, latest 20 unretained kept). Checkpoints roll back selectively by field and Bot, automatically including related plan definitions, inheritance and scope changes; restores stage a draft for preview before saving.
 - Restoring a management-record backup pauses automatic sync until previewed and manually continued; restarting the host does not clear the pause.
+- Restore preflight failures do not introduce a new pause. Failures after the state-writing stage begins retain the pause until the result can be reviewed.
 - **Clean up local records** previews counts and sizes before confirming: it removes completed operation history (up to 500 records), old state backups (latest 5 unretained kept) and skill caches unused for over 7 days, and compacts the journal. Current ownership, permission-recovery data, unfinished operations and skills in use are retained.
 
 ## Installation

@@ -48,21 +48,24 @@ if (typeof document !== "undefined") {
     let requestId = 0,
       draftRevision = 0,
       refreshController = null;
-    document.addEventListener("input", event => {
-      if(event.target.type==='search'||event.target.closest?.('.resource-search'))return;
-      ++draftRevision;
-    });
-    document.addEventListener("change", event => {
-      if(event.target.id==='bot-filter'||event.target.closest?.('.resource-search'))return;
-      ++draftRevision;
-    });
-    const equipmentCounts = new Map();
-    const notify = () => {
+    let comparisonRequest = 0;
+    const invalidateComparison = () => {
       ++draftRevision;
       comparisonState="stale";
       applyFilters();
       for (const note of document.querySelectorAll(".comparison-freshness"))
         DucoroI18n.setText(note, t("草稿已变化，可点击「预览变化」重新核对。"));
+    };
+    const onDraftEdit = event => {
+      if(event.target.type==='search'||event.target.id==='bot-filter'||event.target.closest?.('.resource-search'))return;
+      invalidateComparison();
+    };
+    document.addEventListener("input", onDraftEdit);
+    document.addEventListener("change", onDraftEdit);
+    document.addEventListener("ducoro-editor-change", invalidateComparison);
+    const equipmentCounts = new Map();
+    const notify = () => {
+      invalidateComparison();
       document.dispatchEvent(new Event("input", { bubbles: true }));
     };
     const option = (select, value, text) => {
@@ -649,7 +652,22 @@ if (typeof document !== "undefined") {
       cancel.onclick = () => dialog.close();
       dialog.append(notice, DucoroBackupFiles.actions(preview,apply,cancel)); dialog.addEventListener("close", () => dialog.remove(), { once: true }); document.body.append(dialog); dialog.showModal();
     });
-    $("check-comparison").onclick=async()=>{const button=$("check-comparison");button.disabled=true;comparisonState="loading";applyFilters();try{const result=await ducoroApi("preview",globalThis.DucoroResources.getDraft?.()??draft);globalThis.DucoroResources.showComparison(result);}catch{comparisonState="failed";applyFilters();}finally{button.disabled=false;}};
+    // Both refresh and manual checks use the same request/draft guard.
+    async function checkComparison(options,apiOptions={}) {
+      const guard={request:++comparisonRequest,roster:requestId,revision:draftRevision};
+      comparisonState="loading";applyFilters();
+      try {
+        const result=await ducoroApi("preview",options,apiOptions);
+        if(guard.request!==comparisonRequest||guard.roster!==requestId)return false;
+        if(guard.revision!==draftRevision){comparisonState="stale";applyFilters();return false;}
+        globalThis.DucoroResources.showComparison(result);
+        return true;
+      } catch {
+        if(guard.request===comparisonRequest&&guard.roster===requestId){comparisonState=guard.revision===draftRevision?"failed":"stale";applyFilters();}
+        return false;
+      }
+    }
+    $("check-comparison").onclick=async()=>{const button=$("check-comparison");button.disabled=true;try{await checkComparison(structuredClone(globalThis.DucoroResources.getDraft?.()??draft));}finally{button.disabled=false;}};
     function updateBotSummary(card,bot){
       if(!bot)return;
       const summary=globalThis.DucoroBotSummary.project(draft,data,bot,equipmentCounts.get(bot.id));
@@ -744,6 +762,7 @@ if (typeof document !== "undefined") {
     globalThis.DucoroResources = {
       set(options, preserveBaseline = false) {
         ++requestId;
+        ++comparisonRequest;
         ++draftRevision;
         refreshController?.abort();
         refreshBusy = false;
@@ -754,11 +773,11 @@ if (typeof document !== "undefined") {
         comparisonState="idle";
         render();
       },
-      updateSettings(options){const keys=['syncConnection','syncAgentModels','syncMcp','syncSkills','syncInstructions','syncSubagents','targetAgents','connectionSlug','modelScope','mcpScope','skillsScope'];if(keys.some(k=>JSON.stringify(options[k])!==JSON.stringify(draft[k]))){for(const k of keys)draft[k]=structuredClone(options[k]);comparisonState='stale';render();}},
+      updateSettings(options){const keys=['syncConnection','syncAgentModels','syncMcp','syncSkills','syncInstructions','syncSubagents','targetAgents','connectionSlug','modelScope','mcpScope','skillsScope'];if(keys.some(k=>JSON.stringify(options[k])!==JSON.stringify(draft[k]))){for(const k of keys)draft[k]=structuredClone(options[k]);invalidateComparison();render();}},
       setIssues(value) { issues = value; applyFilters(); },
       focusBot(id,reason) { $("bot-search").value = id; $("bot-filter").value = "all"; applyFilters();const card=botCards.get(id)?.node;if(card){if(reason){let note=card.querySelector(".jump-reason");if(!note){note=el("p",undefined,"jump-reason notice");card.prepend(note);}DucoroI18n.setText(note,reason);}DucoroComponents.reveal(card.querySelector("h3"));} },
       showComparison(value) {
-        ++draftRevision;
+        ++comparisonRequest;
         comparison = value;comparisonState="ready";comparisonTime=value.updatedAt;
         render();
       },
@@ -796,7 +815,7 @@ if (typeof document !== "undefined") {
         };
       },
       scopes(values) {
-        ++draftRevision;
+        invalidateComparison();
         Object.assign(draft, values);
         render();
       },
@@ -809,6 +828,7 @@ if (typeof document !== "undefined") {
         if (refreshBusy) return;
         refreshBusy = true;
         const request = ++requestId;
+        ++comparisonRequest;
         refreshController = new AbortController();
         const signal = refreshController.signal;
         $("refresh-bots").disabled = true;
@@ -854,22 +874,14 @@ if (typeof document !== "undefined") {
               ? t`${next.bots.length} 个 Bot · 刷新于 ${DucoroI18n.dateTime(next.updatedAt, true)} · 未保存的选择已保留`
               : t("Bot 列表读取失败，现有选择已保留。"),
           );
-          const revision = draftRevision;
           const snapshot = structuredClone(
             globalThis.DucoroResources.getDraft?.() ?? draft,
           );
-          try {
-            const nextComparison = await ducoroApi("preview", snapshot, {
+          if(await checkComparison(snapshot, {
               inventoryToken: next.inventoryToken, signal,
-            });
-            if (request !== requestId) return;
-            if(revision!==draftRevision){comparisonState="stale";applyFilters();return;}
-            comparison = nextComparison;comparisonState="ready";comparisonTime=nextComparison.updatedAt;
-            render();
-          document.dispatchEvent(new Event("ducoro-inventory"));
+            })) {
+            document.dispatchEvent(new Event("ducoro-inventory"));
             document.dispatchEvent(new Event("ducoro-controls"));
-          } catch {
-            if(request===requestId){comparisonState="failed";applyFilters();}
           }
         } catch (error) {
           if (request === requestId)

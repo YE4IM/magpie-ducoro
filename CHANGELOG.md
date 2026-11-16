@@ -4,6 +4,7 @@
 
 ### 中文
 
+- 2026-11-14 审计修复（版本保持 0.4.7）：完整保存并校验方案草稿模式，兼容旧草稿；修正目标范围的双语说明及撤销提示；统一差异读取的版本保护并拒收过期响应；备份预检失败不再新增暂停；草稿锁支持已退出进程的安全恢复，归属不明时给出离线处理指引。补充服务端与浏览器回归，未新增产品功能。
 - 修复保存栏状态文字偏上，空草稿提示不再占位，状态文字与操作按钮垂直居中对齐。
 - 统一 Magpie 风格的页头、导航、分组设置、控件、状态、备份和弹窗。
 - Bot 摘要支持按需展开，增加条目和方案目标边界；模型、连接器、技能编辑区按行对齐。
@@ -13,6 +14,7 @@
 
 ### English
 
+- Audit fixes on 2026-11-14 (version remains 0.4.7): preserve and validate plan draft modes with legacy compatibility; correct bilingual target-range and revocation notices; share change-check version guards and discard stale responses; avoid introducing a pause on restore preflight failure; safely recover draft locks from exited processes and provide offline guidance for unknown ownership. Add server and browser regression coverage without adding product features.
 - Vertically center save-bar status text with its action buttons and remove empty draft-status spacing.
 - Unify Magpie-style navigation, grouped settings, controls, status views, backups and dialogs.
 - Add bordered Bot summaries and plan target groups, with aligned resource editors that expand on demand.
