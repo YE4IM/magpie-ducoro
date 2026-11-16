@@ -1,6 +1,8 @@
 {
 const { t } = globalThis.DucoroI18n;
 (async () => {
+  // Use the browser locale until the host supplies its own language.
+  DucoroI18n.applyDocument(navigator.language);
   const open = async () => {
     try {
       DucoroI18n.setText(document.getElementById("launch-state"),t("正在连接 Magpie 页面接口…"));

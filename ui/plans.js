@@ -1,5 +1,29 @@
-// Shared pure projection. Explicit per-Bot values override inherited values.
+// Browser facade of plan-rules.mjs for the classic-script page.
 (() => {
+// Pure configuration rules. Browser facade parity is covered by tests.
+  // Shared by the browser and draft store, including pre-mode drafts.
+  function editorSnapshot(raw, options = {}) {
+    if (raw === null) return null;
+    const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!record(raw) || !Array.isArray(raw.values) || raw.values.length !== 5 ||
+        !raw.values.every(value => typeof value === 'string') || typeof raw.selected !== 'string' ||
+        typeof raw.dirty !== 'boolean' || !(raw.targets === null || Array.isArray(raw.targets) &&
+        raw.targets.every(id => /^agt-[A-Za-z0-9-]+$/.test(id)))) throw Error('Invalid plan editor snapshot');
+    if (raw.modes !== undefined && (!record(raw.modes) ||
+        Object.keys(raw.modes).some(key => !['mcp','skills'].includes(key)) ||
+        ['mcp','skills'].some(key => !['inherit','custom','none'].includes(raw.modes[key])))) throw Error('Invalid plan editor modes');
+    if (raw.modelMode !== undefined && !['inherit','custom'].includes(raw.modelMode)) throw Error('Invalid plan editor model mode');
+    const plan = options.botPlansCatalog?.[raw.selected];
+    const modes = Object.fromEntries(['mcp','skills'].map((kind,index) => {
+      // Old drafts cannot distinguish an empty custom list from inheritance.
+      // Keep the saved plan's mode, defaulting new empty editors to inheritance.
+      const fallback = raw.values[index+2].trim() ? 'custom' :
+        plan?.[kind] === undefined ? 'inherit' : plan[kind].length ? 'custom' : 'none';
+      return [kind, raw.modes?.[kind] ?? fallback];
+    }));
+    return {selected:raw.selected,dirty:raw.dirty,targets:raw.targets === null ? null : [...raw.targets],
+      values:[...raw.values],modes,modelMode:raw.modelMode ?? (raw.values[1].trim() ? 'custom' : 'inherit')};
+  }
   function resolve(options) {
     const out = structuredClone(options);
     out.botModels ??= {}; out.resourceAssignments ??= {}; out.botInstructions ??= {};
@@ -48,5 +72,6 @@
     for(const key of ['botModels','resourceAssignments','botInstructions'])if(next[key])delete next[key][id];
     return next;
   }
-  globalThis.DucoroPlans = { resolve,source,copyEffective,clearOverrides };
+
+  globalThis.DucoroPlans = {resolve,source,copyEffective,clearOverrides,editorSnapshot};
 })();

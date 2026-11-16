@@ -1,8 +1,9 @@
+import {desiredResources as planDesiredResources} from './resource-plan.mjs';
 import {validateLibrary} from './library-schema.mjs';
 import {renderSubagent} from './total.mjs';
 import {totalTargets} from './resource-fingerprint.mjs';
-import {planResourceScopes,scopedLibrary} from './resource-scopes.mjs';
-import './ui/plans.js';
+import {planResourceScopes} from './resource-scopes.mjs';
+import * as Plans from './plan-rules.mjs';
 import { mapLimit } from "./performance.mjs";
 import { planAccountConnector, samePolicy } from './account-plan.mjs';
 import {createHash} from 'node:crypto';
@@ -15,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { list, policyRows } from './inventory-shapes.mjs';
 import { modelEligible, modelTarget } from './model-sync.mjs';
 export async function verifyConfiguration({options, state, run, paths, report = {}, signal, onProgress = () => {}}) {
-  options=globalThis.DucoroPlans.resolve(options);
+  options=Plans.resolve(options);
   const rows = [];
   const deadline=Date.now()+25000;
   let source=null;
@@ -97,8 +98,14 @@ export async function verifyConfiguration({options, state, run, paths, report = 
     if(paths.ducoroHome&&info?.paths?.ducoroHome&&await realpath(paths.ducoroHome)===await realpath(info.paths.ducoroHome))home=await realpath(paths.ducoroHome);
   }catch{}
   const localPath=async path=>{if(!home)throw Error();const resolved=await realpath(path);if(!resolved.startsWith(home+sep)||(await lstat(path)).isSymbolicLink())throw Error();return resolved;};
-  let changed=[],sourceReady=false;
-  try{changed=await contentChanges({paths,state,options,bots:rosterReady?bots:[]});sourceReady=!!library&&rosterReady;}catch{}
+  let changed=[],sourceReady=false,resourceDesired=null;
+  try {
+    let exported;
+    try {exported=JSON.parse(await readFile(paths.mcp,{encoding:'utf8',signal}));}catch(error){if(signal?.aborted)throw error;}
+    if(library&&rosterReady)resourceDesired=planDesiredResources({library,options,scopes:planResourceScopes(options,bots),exported,exportReadable:!!exported,state,env:process.env});
+    changed=await contentChanges({paths,state,options,bots:rosterReady?bots:[],desired:resourceDesired,library,signal,deadline});
+    sourceReady=!!library&&rosterReady;
+  }catch{}
   const expectedSubagents=new Map();
   if(library&&rosterReady&&options.syncSubagents)for(const item of library.subagents??[]) {
     if(item.offHere||item.disabled||item.enabled===false||!(item.agents?.includes('ducoro')||options.subagentNames?.includes(item.name)))continue;
@@ -111,18 +118,13 @@ export async function verifyConfiguration({options, state, run, paths, report = 
   // disappearing because no ownership entry was committed yet.
   const desiredResources={skills:new Set(),mcp:new Set()};
   let scopeReady=false;
-  if(library&&rosterReady)try {
-    const plan=planResourceScopes(options,bots);
-    for(const [kind,scopes] of [['skills',plan.skillScopes],['mcp',plan.mcpScopes]])if(options[kind==='skills'?'syncSkills':'syncMcp']) {
-      for(const scope of scopes)for(const item of scopedLibrary(library,options,kind,scope)[kind]??[]) {
-        if(item.offHere||item.disabled||item.enabled===false||!item.agents?.includes('ducoro'))continue;
-        if(kind==='mcp'&&options.syncLibraryMcp===false)continue;
-        desiredResources[kind].add(`${scope}/${item.name}`);
-        if(!Object.values(state[kind]??{}).some(row=>row.scope===scope&&row.sourceName===item.name))add(kind,`${scope}/${item.name}`,'unknown',{missingEvidence:'所选资源尚无经过核实的管理记录。'});
-      }
+  if(resourceDesired) {
+    for(const kind of ['skills','mcp'])for(const [scope,entries] of resourceDesired[kind])for(const item of entries.values()) {
+      desiredResources[kind].add(`${scope}/${item.name}`);
+      if(!Object.values(state[kind]??{}).some(row=>row.scope===scope&&row.sourceName===item.name))add(kind,`${scope}/${item.name}`,'unknown',{missingEvidence:'所选资源尚无经过核实的管理记录。'});
     }
     scopeReady=true;
-  }catch{add('resources','global','unknown');}
+  } else add('resources','global','unknown');
 
   for(const [feature,enabled] of [['mcp',options.syncMcp],['skills',options.syncSkills],['subagents',options.syncSubagents]]) {
     const records=Object.entries(feature==='subagents'?state.total?.files??{}:state[feature]??{});
@@ -144,11 +146,11 @@ export async function verifyConfiguration({options, state, run, paths, report = 
           const args=owned.scope==='global'?['skill','show',owned.name]:['agent','skill','show',owned.scope,owned.name];
           const shown=await read(args);if(!shown?.dirPath||shown.name!==owned.name)throw Error();
           const installed=await localPath(shown.dirPath);
-          if(!owned.dir || (await skillFingerprint(owned.dir)).hash!==owned.hash)throw Error();
-          const [expected,actual]=await Promise.all([skillFingerprint(owned.dir,{includeModes:false}),skillFingerprint(installed,{includeModes:false})]);
-          if((await skillFingerprint(owned.dir)).hash!==owned.hash)throw Error();
+          if(!owned.dir || (await skillFingerprint(owned.dir,{signal,deadline})).hash!==owned.hash)throw Error();
+          const [expected,actual]=await Promise.all([skillFingerprint(owned.dir,{includeModes:false,signal,deadline}),skillFingerprint(installed,{includeModes:false,signal,deadline})]);
+          if((await skillFingerprint(owned.dir,{signal,deadline})).hash!==owned.hash)throw Error();
           digest=actual.hash;expectedHash=expected.hash;
-          const [privateExpected,persisted]=await Promise.all([skillFingerprint(owned.dir,{modeMask:0o700}),skillFingerprint(installed)]);
+          const [privateExpected,persisted]=await Promise.all([skillFingerprint(owned.dir,{modeMask:0o700,signal,deadline}),skillFingerprint(installed,{signal,deadline})]);
           permissionsVerified=privateExpected.hash===persisted.hash;
           permissionEvidence=permissionsVerified?'正文与仅所有者可访问的文件权限均一致。':'文件权限与私有导入规则不一致，请检查可执行附属文件。';
         } else if(feature==='subagents') {

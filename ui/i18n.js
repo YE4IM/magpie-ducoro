@@ -2,6 +2,17 @@
 // Only plugin-authored strings are translated; names and values are interpolation arguments.
 (() => {
   const ENGLISH = {
+"技能扫描超过时限，请缩小目录后重试":"Skill scanning timed out. Reduce the bundle size and try again.",
+"读取超过时限，请重试":"Reading timed out. Try again.",
+"技能来源名称无效":"The skill source name is invalid.",
+"技能目录数量或深度超限":"The skill bundle exceeds the directory count or depth limit.",
+"技能目录条目过多":"The skill bundle contains too many directory entries.",
+
+"草稿锁无法确认归属。请停止所有插件宿主，备份后移走 page-draft.lock 与 page-draft-locks，再重新打开页面。":"The draft lock owner cannot be verified. Stop all plugin hosts, back up and move page-draft.lock and page-draft-locks aside, then reopen the page.",
+"目标范围已缩小：范围外 Bot 的托管资源库连接器或技能将撤销，账户连接器仍按各 Bot 单独配置。":"The target range was narrowed. Managed library connectors or skills outside this range will be revoked. Account connectors remain configured separately for each Bot.",
+"备份已不存在，请刷新备份列表。":"The backup no longer exists. Refresh the backup list.",
+"备份校验失败，请重新预览有效备份。":"Backup verification failed. Preview a valid backup again.",
+"请先预览并核对备份。":"Preview and verify the backup before restoring it.",
 "账户连接器操作未完成；现有分配已保留":"The account connector operation did not finish; existing assignments are preserved",
 "Bot 不支持账户连接器":"This Bot does not support account connectors",
 "连接器配备已由其他页面修改":"Another page changed the connector assignments",
@@ -158,7 +169,7 @@
 "更新失败，最后读取于 {0}。{1}；请刷新任务重试。":"Update failed. Last loaded: {0}. {1} Refresh tasks to retry.",
 "尚无成功记录":"No successful read",
 "Bot 资源分配":"Bot resource assignments",
-"仅影响模型、指令与子代理的目标范围；也可从下方名册选择。":"Only affects model, instruction and subagent targets. You can also select Bots from the list below.",
+"影响模型、指令与子代理；按 Bot 分配时也限定资源库连接器和技能，范围外的托管资源会撤销。账户连接器仍按各 Bot 单独配置。":"Applies to models, instructions and subagents. In per-Bot mode it also limits library connectors and skills; managed resources outside this range are revoked. Account connectors remain configured separately for each Bot.",
 "各项同步结果":"Sync results by resource",
 "同步内容":"Content to sync",
 "备份与恢复":"Backup and restore",

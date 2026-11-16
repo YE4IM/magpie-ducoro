@@ -1,4 +1,5 @@
 import {backupMetadata,removeBackupMetadata,pruneBackups} from './backup-metadata.mjs';
+import {publicError} from './page-http.mjs';
 import { readFile, open, mkdir, rename, unlink, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -323,20 +324,20 @@ export async function stateBackups(file) {
   return result.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
 export async function previewStateBackup(file,id) {
-  if(!/^[a-f0-9]{64}$/.test(id??''))throw Error('备份标识无效');
+  if(!/^[a-f0-9]{64}$/.test(id??''))throw publicError(422,'INVALID_BACKUP','备份标识无效');
   const {dirname,join}=await import('node:path');
   const {createHash}=await import('node:crypto');
-  const body=await readFile(join(dirname(file),'state-backups',id+'.json'),'utf8');
-  if(createHash('sha256').update(body).digest('hex')!==id)throw Error('备份校验失败');
-  const state=validateState(JSON.parse(body));
+  const body=await readFile(join(dirname(file),'state-backups',id+'.json'),'utf8').catch(error=>{if(error.code==='ENOENT')throw publicError(404,'BACKUP_NOT_FOUND','备份已不存在，请刷新备份列表。');throw error;});
+  if(createHash('sha256').update(body).digest('hex')!==id)throw publicError(422,'INVALID_BACKUP','备份校验失败，请重新预览有效备份。');
+  let state;
+  try{state=validateState(JSON.parse(body));}catch{throw publicError(422,'INVALID_BACKUP','备份校验失败，请重新预览有效备份。');}
   const current=await readManagedState(file).catch(()=>null);
   return {id,checksum:id,counts:counts(state),currentCounts:current?counts(current.state):null,state};
 }
-export async function restoreStateBackup(file,id,checksum) {
-  if(id!==checksum)throw Error('请先预览并核对备份');
+export async function restoreStateBackup(file,id,checksum,{beforeRestore=async()=>{}}={}) {
+  if(id!==checksum)throw publicError(409,'BACKUP_PREVIEW_REQUIRED','请先预览并核对备份。');
   const preview=await previewStateBackup(file,id);
-  const {writeFile,rename,copyFile,unlink}=await import('node:fs/promises');
-  const {randomUUID}=await import('node:crypto');
+  const {copyFile}=await import('node:fs/promises');
   // Preserve the original even when corrupt, independently of valid backups.
   await copyFile(file,`${file}.before-restore`).catch(e=>{if(e.code!=='ENOENT')throw e;});
   await copyFile(file+'.journal',file+'.journal.before-restore').catch(e=>{if(e.code!=='ENOENT')throw e;});
@@ -344,6 +345,9 @@ export async function restoreStateBackup(file,id,checksum) {
   // before journal rotation must never replay the state being rolled back.
   let max=preview.state._journalSeq??0;
   for(const line of (await optional(file+'.journal')??'').split('\n'))try{const row=JSON.parse(JSON.parse(line).payload);if(Number.isSafeInteger(row.seq))max=Math.max(max,row.seq);}catch{}
+  // Preflight and preservation are complete. Pause only immediately before
+  // the first state mutation; failures from this point must remain paused.
+  await beforeRestore();
   await compact(file,{...preview.state,_journalSeq:max+1},false);
 }
 
@@ -359,7 +363,7 @@ export async function deleteStateBackup(file, id, checksum) {
     await unlink(join(dirname(file), 'state-backups', id + '.json'));
     return { deleted: true };
   } catch (error) {
-    if (error.code === 'ENOENT') return { deleted: false };
+    if (error.code === 'ENOENT' || error.publicCode === 'BACKUP_NOT_FOUND') return { deleted: false };
     throw error;
   }
 }

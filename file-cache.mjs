@@ -5,7 +5,10 @@ const LIMIT = 16 * 1024 * 1024;
 const MAX_ENTRIES = 2048;
 export const fileMetrics = { reads: 0, bytes: 0, hits: 0 };
 export function clearFileCache() { generation++; cache.clear(); flights.clear(); size = 0; }
-export function readCachedFile(path) {
+export function readCachedFile(path, {signal} = {}) {
+  signal?.throwIfAborted();
+  // A cancellable caller owns its read; never cancel another caller's flight.
+  if (signal) return readFileBytes(path, generation, signal);
   if (flights.has(path)) return flights.get(path);
   const pending = readFileBytes(path, generation).finally(() => {
     if (flights.get(path) === pending) flights.delete(path);
@@ -13,12 +16,13 @@ export function readCachedFile(path) {
   flights.set(path, pending);
   return pending;
 }
-async function readFileBytes(path, startedGeneration) {
+async function readFileBytes(path, startedGeneration, signal) {
   const info = await stat(path, { bigint: true });
   const stamp = [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, info.mode].join(':');
   const old = cache.get(path);
   if (old?.stamp === stamp) { fileMetrics.hits++; cache.delete(path); cache.set(path,old); return old.bytes; }
-  const bytes = await readFile(path); fileMetrics.reads++; fileMetrics.bytes += bytes.length;
+  signal?.throwIfAborted();
+  const bytes = await readFile(path, {signal}); fileMetrics.reads++; fileMetrics.bytes += bytes.length;
   const after = await stat(path,{bigint:true});
   if (stamp !== [after.dev,after.ino,after.size,after.mtimeNs,after.ctimeNs,after.mode].join(':')) throw Error('Skill changed during reading');
   // Invalidated reads may finish, but must not repopulate the next generation.

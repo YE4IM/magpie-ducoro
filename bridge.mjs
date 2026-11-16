@@ -1,6 +1,7 @@
+import {selected} from "./inventory-shapes.mjs"
 import {within} from './path-safety.mjs'
 import {validateLibrary} from './library-schema.mjs'
-import {skillFingerprint} from './content-preview.mjs'
+import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown} from './skill-bundle.mjs'
 import {createOperationRetries} from './operation-retries.mjs'
 import {syncResources} from './sync-resources.mjs'
 import {commandFailure} from './operation-controls.mjs'
@@ -13,8 +14,8 @@ import { defHash,readableMcpHash } from './resource-fingerprint.mjs'
 import { maintainLocalRecords } from "./local-records.mjs"
 import { createSkillArtifacts } from "./skill-artifacts.mjs"
 import { createOperationStore } from "./operation-store.mjs"
-import { readCachedFile, clearFileCache, fileMetrics } from "./file-cache.mjs"
-import "./ui/plans.js"
+import { clearFileCache, fileMetrics } from "./file-cache.mjs"
+import * as Plans from "./plan-rules.mjs"
 import { createReadCoordinator, createProgress } from "./performance.mjs"
 // Ducoro connector bridge — the Bun main module of magpie-ducoro.
 //
@@ -67,7 +68,7 @@ import { pathToFileURL } from "node:url"
 import { createTotalSync } from "./total.mjs"
 import { createModelSync } from "./model-sync.mjs"
 import { resolveCapabilityMappings, createCapabilityCatalog } from "./model-capabilities.mjs"
-import { mcpCommand, needsResourceTargets, planResourceScopes, scopedLibrary, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
+import { mcpCommand, needsResourceTargets, planResourceScopes, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
 import { createDiagnostics, removeLegacyReports } from "./diagnostics.mjs"
 import { validateOptions } from "./options.mjs"
 
@@ -86,25 +87,7 @@ const DEFAULT_PATHS = {
 
 // ---------------------------------------------------------------- helpers
 
-const sha256 = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 20)
-
-const slugify = (s) =>
-  String(s)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "x"
-
-// Keep existing canonical names readable. Lossy normalization needs a stable
-// suffix: a_b, a-b, A-B and long/non-ASCII names must never share an identity.
-const mcpSlug = (name, prefix) => {
-  const source = String(name)
-  const simple = slugify(source)
-  return prefix + (source === simple && !/-[a-f0-9]{12}$/.test(source)
-    ? simple
-    : `${simple.slice(0, 35).replace(/-+$/, "")}-${sha256(source).slice(0, 12)}`)
-}
-
+import {sha256, slugify, mapServer, desiredResources} from "./resource-plan.mjs"
 const str = (v) => (typeof v === "string" ? v.trim() : "")
 
 const normalizeModel = (model) => {
@@ -133,29 +116,6 @@ const parseLibMcp = (json) => {
 }
 
 // claude-format server definition -> our internal shape (null when unmappable)
-const mapServer = (name, def, prefix) => {
-  if (!def || typeof def !== "object") return null
-  if (def.disabled === true || def.enabled === false) return null
-  const slug = mcpSlug(name, prefix)
-  const type = str(def.type).toLowerCase()
-  const headers = def.headers && typeof def.headers === "object"
-    ? Object.entries(def.headers).map(([k, v]) => [k, String(v)])
-    : []
-  if (type === "http" || type === "sse" || (!def.command && def.url)) {
-    const url = str(def.url)
-    if (!url) return null
-    return { slug, name, transport: type === "sse" ? "sse" : "http", url, headers, env: [], command: null, args: null }
-  }
-  if (def.command) {
-    const args = Array.isArray(def.args) ? def.args.map((a) => String(a)) : []
-    const env = def.env && typeof def.env === "object"
-      ? Object.entries(def.env).map(([k, v]) => [k, String(v)])
-      : []
-    return { slug, name, transport: "stdio", command: String(def.command), args, env, url: null, headers: [] }
-  }
-  return null
-}
-
 // SKILL.md frontmatter name, falling back to the directory name
 const skillName = (md, fallback) => {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(md))
@@ -170,13 +130,6 @@ const skillName = (md, fallback) => {
 // file. Versions (0.9.x) and Windows executable names (heptabase.cmd) are
 // prose, not bundle files. HTML code keeps the same rendered instructions
 // without creating fake companion files or hiding missing relative paths.
-const compatibleSkillMarkdown = (md, fileNames) => md.replace(/`([^`\n]+)`/g, (match, token) => {
-  if (fileNames.has(token)) return match
-  const version = /^v?\d+(?:\.\d+)+(?:\.[xX*])?(?:-[a-zA-Z0-9.-]+)?$/.test(token)
-  const executable = /^[a-zA-Z0-9_-]+\.(?:cmd|exe|bat)$/i.test(token)
-  return version || executable ? `<code>${token}</code>` : match
-})
-
 const sameSet = (a, b) => {
   const norm = (x) => (Array.isArray(x) ? [...x].map(String).sort() : [])
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
@@ -260,7 +213,7 @@ const createEngine = (input = {}, options = {}) => {
   merge(input?.magpie?.option)
 
   const rawOptions = structuredClone(opts)
-  if (!validateOptions(opts).length) Object.assign(opts, globalThis.DucoroPlans.resolve(opts))
+  if (!validateOptions(opts).length) Object.assign(opts, Plans.resolve(opts))
   const progress = createProgress()
   const dryRun = opts.dryRun === true || opts.dryRun === "true"
 
@@ -644,9 +597,7 @@ const createEngine = (input = {}, options = {}) => {
     return r.ok
   }
 
-  const selected = (items) => items.filter((item) =>
-    item && item.offHere !== true && item.disabled !== true && item.enabled !== false &&
-    Array.isArray(item.agents) && item.agents.includes("ducoro"))
+  // Selection rules are shared with the page service.
 
   const loadLibrary = async () => {
     const lib = await readJson(paths.library)
@@ -654,76 +605,6 @@ const createEngine = (input = {}, options = {}) => {
       throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`)
     }
     return { ...lib, mcp: lib.mcp ?? [], skills: lib.skills ?? [] }
-  }
-
-  const desiredMcpServers = async (library) => {
-    const wanted = new Map()
-    if (opts.syncLibraryMcp) {
-      const exported = await readJson(paths.mcp)
-      const lib = parseLibMcp(exported)
-      for (const server of selected(library.mcp)) {
-        const name = str(server.name)
-        if (!name) continue
-        const slug = mcpSlug(name, String(opts.mcpPrefix))
-        // Keep the access decision separate from definition preparation. A
-        // broken export, missing variable or unsupported argument is retryable,
-        // not evidence that the user revoked this server.
-        wanted.set(slug, null)
-        if (!exported && Object.values(state.mcp).some(mine => mine?.slug === slug)) {
-          log(`MCP server "${name}" kept while its export is unreadable; will retry`)
-          requestRetry("mcp-sync")
-          continue
-        }
-        // A routed export only contains "magpie". Ducoro needs an individual
-        // definition to show each selected server and its real tool catalog.
-        // Prefer an individual export (Magpie may have added an auth proxy),
-        // otherwise use that selected server's original library definition.
-        const direct = lib[name]
-        let def = direct ?? { ...server, type: server.transport }
-        if (direct?.url && /\/mcp\/magpie\/hub(?:\/|$)/.test(direct.url)) {
-          def = { ...server, type: server.transport }
-        }
-        if (def.disabled === true || def.enabled === false) {
-          wanted.delete(slug)
-          continue
-        }
-        try {
-          const expand = (value) => typeof value === "string" ? value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key) => {
-            if (process.env[key] === undefined) throw new Error(`missing environment variable ${key}`)
-            return process.env[key]
-          }) : value
-          def = {
-            ...def,
-            command: expand(def.command), url: expand(def.url),
-            args: Array.isArray(def.args) ? def.args.map(expand) : def.args,
-            env: Object.fromEntries(Object.entries(def.env ?? {}).map(([k, v]) => [k, expand(v)])),
-            headers: Object.fromEntries(Object.entries(def.headers ?? {}).map(([k, v]) => [k, expand(v)])),
-          }
-        } catch (e) {
-          log(`MCP server "${name}" skipped: ${e.message}`)
-          requestRetry("mcp-sync")
-          continue
-        }
-        const mapped = mapServer(name, def, String(opts.mcpPrefix))
-        if (!mapped) {
-          warnOnce(`mcp:${name}`, `cannot map MCP server "${name}" to a ducoro definition; skipped`)
-          requestRetry("mcp-sync")
-          continue
-        }
-        if (mapped.transport === "stdio" && (mapped.args ?? []).some((a) => a.includes(","))) {
-          warnOnce(
-            `mcp:${name}:args`,
-            `MCP server "${name}" skipped: one of its arguments contains a comma, ` +
-              `which ducoro-cli's single-use --args flag cannot represent`,
-          )
-          requestRetry("mcp-sync")
-          continue
-        }
-        mapped.disabledTools = Array.isArray(server.disabledTools) ? server.disabledTools.map(String) : []
-        wanted.set(mapped.slug, mapped)
-      }
-    }
-    return wanted
   }
 
   const pendingMcpProbes = new Map()
@@ -795,8 +676,10 @@ const createEngine = (input = {}, options = {}) => {
     await migrateMcpOwnership()
     const wanted = new Map()
     for (const scope of resourcePlan.mcpScopes) {
-      const definitions = await desiredMcpServers(scopedLibrary(library, opts, "mcp", scope))
-      for (const [slug, def] of definitions) wanted.set(`${scope}:${slug}`, { scope, slug, def })
+      for (const entry of desiredPlan.mcp.get(scope)?.values() ?? []) {
+        if (entry.status === 'unknown') requestRetry('mcp-sync')
+        wanted.set(`${scope}:${entry.slug}`, {scope, slug:entry.slug, def:entry.definition})
+      }
     }
     authorizedMcpSlugs = new Set(wanted.keys())
     const scopes = new Set([...resourcePlan.mcpScopes, ...Object.values(state.mcp).map(mine => mine.scope)])
@@ -888,39 +771,7 @@ const createEngine = (input = {}, options = {}) => {
   let skillCacheGeneration = 0
   const invalidateSkillCache = () => { skillCacheGeneration++; skillBundleCache.clear(); clearFileCache() }
 
-  const readBundle = async (source) => {
-    const root = await realpath(source)
-    const files = []
-    let bytesTotal=0
-    const walk = async (dir, rel = "", parents = new Set()) => {
-      const resolved = await realpath(dir)
-      if (!within(root,resolved)) throw new Error("skill link escapes its bundle")
-      if (parents.has(resolved)) throw new Error("cyclic skill link")
-      const ancestors = new Set([...parents, resolved])
-      for (const e of await readdir(dir, { withFileTypes: true })) {
-        if (e.name === ".DS_Store" || e.name === ".git") continue
-        const path = join(dir, e.name)
-        const target = await realpath(path)
-        if (!within(root,target)) throw new Error("skill link escapes its bundle")
-        const info = await stat(path)
-        const name = rel ? `${rel}/${e.name}` : e.name
-        if (info.isDirectory()) await walk(path, name, ancestors)
-        else if (info.isFile()) { bytesTotal+=info.size; if(files.length>=5000 || bytesTotal>32*1024*1024)throw Error("skill bundle too large"); files.push({ name, path, mode: info.mode & 0o777 }) }
-        else throw new Error(`unsupported skill entry: ${name}`)
-      }
-    }
-    await walk(root)
-    files.sort((a, b) => a.name.localeCompare(b.name))
-    const manifest = files.find((f) => f.name === "SKILL.md")
-    if (!manifest) throw new Error("SKILL.md missing")
-    const md = compatibleSkillMarkdown((await readCachedFile(manifest.path)).toString("utf8"), new Set(files.map((f) => f.name)))
-    const hash = createHash("sha256")
-    for (const f of files) {
-      const bytes = f.name === "SKILL.md" ? Buffer.from(md) : await readCachedFile(f.path)
-      hash.update(JSON.stringify([f.name, bytes.length, f.mode])).update(bytes)
-    }
-    return { files, md, hash: hash.digest("hex") }
-  }
+  const readBundle = readSkillBundle
 
   const artifacts = createSkillArtifacts(join(stateDir, "skill-artifacts"), readBundle)
 
@@ -949,10 +800,9 @@ const createEngine = (input = {}, options = {}) => {
     for (const item of selected(library.skills)) {
       const sourceName = str(item.name)
       if (!sourceName || basename(sourceName) !== sourceName || sourceName === "." || sourceName === "..") continue
-      let dir = null
-      for (const path of [join(paths.skills, sourceName), join(paths.librarySkills, sourceName)]) {
-        if ((await stat(path).catch(() => null))?.isDirectory()) { dir = path; break }
-      }
+      let dir
+      try {dir = await findSkillSource(sourceName,[paths.skills,paths.librarySkills])}
+      catch {requestRetry('skill-source');found.set(sourceName,{sourceName});continue}
       if (!dir) {
         log(`selected skill ${sourceName} has no readable bundle; will retry`)
         requestRetry("skill-source")
@@ -1016,7 +866,7 @@ const createEngine = (input = {}, options = {}) => {
     await reconcileCreations("skills")
     let complete = true
     const sourceNames = new Map(resourcePlan.skillScopes.map(scope => [scope,
-      new Set(selected(scopedLibrary(library, opts, "skills", scope).skills).map(item => str(item.name))),
+      new Set(desiredPlan.skills.get(scope)?.keys() ?? []),
     ]))
     for (const [id, mine] of Object.entries(state.skills)) {
       if (!mine.scope) {
@@ -1085,7 +935,7 @@ const createEngine = (input = {}, options = {}) => {
     const bundles = opts.syncSkills ? await skillBundlesForRound(library) : new Map()
     if (!bundles.size) return
     for (const scope of resourcePlan.skillScopes) {
-      const sourceNames = new Set(selected(scopedLibrary(library, opts, "skills", scope).skills).map(item => str(item.name)))
+      const sourceNames = new Set(desiredPlan.skills.get(scope)?.keys() ?? [])
       const scopedBundles = scopedSkillBundles(bundles,sourceNames)
       for (const [name,group] of scopedBundles) if (!group.bundle) {
         const operation = await operations.begin('skills',scope,name,{conflictingSources:group.sources},['revoke-skills'])
@@ -1242,6 +1092,7 @@ const createEngine = (input = {}, options = {}) => {
   const syncTotal = createTotalSync({ operations, opts: { ...opts, dryRun }, paths, run, save: saveState, getState: () => state, requestRetry: (...args) => requestRetry(...args), log })
 
   let resourcePlan = null
+  let desiredPlan = null
   const resolveResourcePlan = async () => {
     validateResourceOptions(opts)
     let bots = []
@@ -1306,11 +1157,14 @@ const createEngine = (input = {}, options = {}) => {
     }
     if (library) {
       resourcePlan = null
+      desiredPlan = null
       try { resourcePlan = await resolveResourcePlan() } catch (e) {
         log("resource scope planning failed:", e?.message ?? e)
         requestRetry("resource-targets")
       }
       if (resourcePlan) {
+        const exported = await readJson(paths.mcp)
+        desiredPlan = desiredResources({library, options:opts, scopes:resourcePlan, exported, exportReadable:!!exported, state, env:process.env})
         for (const issue of findUnavailableAssignments(library, opts, resourcePlan)) {
           diagnostics.retry("resource-selection-unavailable", [issue.kind], [issue.scope])
         }

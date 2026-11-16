@@ -1,9 +1,30 @@
+## 0.4.8
+
+- 统一预览、同步和核验的资源期望状态；正确预览导出配置禁用连接器后的撤销。
+- 内容比较仅检查最终仍被分配的资源，修复技能同时显示撤销与更新。
+- 共享技能扫描支持取消、总时限、目录深度及规模限制，保持既有摘要格式。
+- 抽出纯方案规则，服务端不再通过 UI 全局变量调用方案业务逻辑；浏览器规则自动生成并校验。
+- 将 Node 与中文浏览器回归接入 npm test，补充中断恢复和未知结果核验测试，使用动态端口。
+- 更新版本标识、中文说明与英文 README，补齐新增扫描提示的英文翻译；验证语言切换保留草稿、焦点及弹窗。
+- 发布前移除测试、QA、开发记录和旧打包产物；保留必要运行文件与恢复命令，Release 仅保留 GitHub 自动生成的 Source code。
+
+### English
+
+- Share resource selection and normalization across preview, execution and verification; report connector revocations when the exported definition is disabled.
+- Compare content only for resources that remain assigned, preventing a skill from appearing as both removed and updated.
+- Share cancellable, time-bounded skill scanning with directory and size limits while preserving the existing digest format.
+- Extract pure plan rules for the server and generate the classic browser facade from the same source, checked before tests.
+- Run isolated Node and English/Chinese browser regressions through npm test, including restart recovery and readback after uncertain command outcomes.
+- Update the English README and bilingual release notes, and translate new scan messages without changing user-authored values.
+- Remove tests, QA output, development records and old packages from the release tree; retain runtime files and recovery commands, and publish only GitHub-generated Source code.
+
 # 更新记录 / Changelog
 
 ## 0.4.7 — 2026-11-13
 
 ### 中文
 
+- 2026-11-14 审计修复（版本保持 0.4.7）：完整保存并校验方案草稿模式，兼容旧草稿；修正目标范围的双语说明及撤销提示；统一差异读取的版本保护并拒收过期响应；备份预检失败不再新增暂停；草稿锁支持已退出进程的安全恢复，归属不明时给出离线处理指引。补充服务端与浏览器回归，未新增产品功能。
 - 修复保存栏状态文字偏上，空草稿提示不再占位，状态文字与操作按钮垂直居中对齐。
 - 统一 Magpie 风格的页头、导航、分组设置、控件、状态、备份和弹窗。
 - Bot 摘要支持按需展开，增加条目和方案目标边界；模型、连接器、技能编辑区按行对齐。
@@ -13,6 +34,7 @@
 
 ### English
 
+- Audit fixes on 2026-11-14 (version remains 0.4.7): preserve and validate plan draft modes with legacy compatibility; correct bilingual target-range and revocation notices; share change-check version guards and discard stale responses; avoid introducing a pause on restore preflight failure; safely recover draft locks from exited processes and provide offline guidance for unknown ownership. Add server and browser regression coverage without adding product features.
 - Vertically center save-bar status text with its action buttons and remove empty draft-status spacing.
 - Unify Magpie-style navigation, grouped settings, controls, status views, backups and dialogs.
 - Add bordered Bot summaries and plan target groups, with aligned resource editors that expand on demand.

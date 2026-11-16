@@ -1,13 +1,16 @@
-import "./ui/plans.js";
+import * as Plans from "./plan-rules.mjs";
 import "./ui/i18n.js";
 const { format, translate, message } = globalThis.DucoroI18n;
 // Read-only, projected plan: never return ownership records, endpoints or credentials.
+import {desiredResources, resourceTransitions} from "./resource-plan.mjs";
+import {readFile} from "node:fs/promises";
+import {validateLibrary} from "./library-schema.mjs";
+import {checkScan, isScanStopped, withScanBudget} from "./skill-bundle.mjs";
 import { contentChanges } from "./content-preview.mjs";
 import { join } from "node:path";
 import { readManagedState } from "./state-store.mjs";
 import {
   planResourceScopes,
-  scopedLibrary,
   findUnavailableAssignments,
 } from "./resource-scopes.mjs";
 import {
@@ -54,7 +57,10 @@ export async function detectCapabilities(run) {
     ),
   );
 }
-export async function buildSyncPreview({
+export async function buildSyncPreview(input) {
+  return withScanBudget({...input,budgetMs:input.budgetMs ?? 25000},buildPreview);
+}
+async function buildPreview({
   options,
   currentOptions,
   sourceOptions = options,
@@ -66,7 +72,9 @@ export async function buildSyncPreview({
   language = "zh",
   signal,
   budgetMs = 25000,
+  deadline = Date.now() + budgetMs,
 }) {
+  checkScan({signal,deadline});
   const result = {
     updatedAt: new Date().toISOString(),
     readOnly: true,
@@ -118,25 +126,29 @@ export async function buildSyncPreview({
         resources: [],
         accounts: [],
         model: null,
-        sources:Object.fromEntries(["model","mcp","skills","instructions"].map(kind=>[kind,globalThis.DucoroPlans.source(sourceOptions,id,kind)])),
+        sources:Object.fromEntries(["model","mcp","skills","instructions"].map(kind=>[kind,Plans.source(sourceOptions,id,kind)])),
       };
       result.rows.push(row);
     }
     return row;
   };
   const plan = planResourceScopes(options, bots);
-  if (data.library) {
-    const library = Object.fromEntries(
-      ["mcp", "skills"].map((kind) => [
-        kind,
-        data.library[kind].map((x) => ({ ...x, agents: ["ducoro"] })),
-      ]),
-    );
+  let resourceDesired, sourceLibrary;
+  try {
+    checkScan({signal,deadline});
+    const library = sourceLibrary = paths?.library ? validateLibrary(JSON.parse(await readFile(paths.library,{encoding:'utf8',signal}))) :
+      Object.fromEntries(['mcp','skills'].map(kind=>[kind,(data.library?.[kind] ?? []).map(item=>({...item,agents:['ducoro']}))]));
+    let exported, exportReadable = false;
+    try { exported = JSON.parse(await readFile(paths.mcp,{encoding:'utf8',signal})); exportReadable = !!exported; }
+    catch (error) { if (signal?.aborted) throw error; }
+    checkScan({signal,deadline});
+    resourceDesired = desiredResources({library, options, scopes:plan, exported, exportReadable, state, env:process.env});
     for (const issue of findUnavailableAssignments(library, options, plan))
       warn("{0}：指定的{1}当前不可用，相关同步将保留现状或等待重试。", [
         issue.scope,
         message(issue.kind === "skills" ? "技能" : "连接器"),
       ]);
+    let targetScopeWarned = false;
     for (const kind of ["mcp", "skills"]) {
       const scopes =
         kind === "mcp"
@@ -144,16 +156,7 @@ export async function buildSyncPreview({
             ? []
             : plan.mcpScopes
           : plan.skillScopes;
-      const wanted = new Map(
-        scopes.map((scope) => [
-          scope,
-          new Set(
-            scopedLibrary(library, options, kind, scope)[kind].map(
-              (x) => x.name,
-            ),
-          ),
-        ]),
-      );
+      const wanted = resourceDesired[kind];
       const owned = new Map();
       for (const [key, value] of Object.entries(state[kind] ?? {})) {
         const scope = value?.scope ?? "global",
@@ -168,23 +171,19 @@ export async function buildSyncPreview({
         names.add(name);
         owned.set(scope, names);
       }
-      for (const scope of new Set([...wanted.keys(), ...owned.keys()])) {
-        const before = owned.get(scope) ?? new Set(),
-          after = wanted.get(scope) ?? new Set();
-        for (const name of new Set([...before, ...after]))
-          if (before.has(name) !== after.has(name))
-            rowFor(scope).resources.push({
-              kind,
-              name,
-              action: after.has(name) ? "add" : "remove",
-            });
-      }
+      for (const {scope, ...change} of resourceTransitions(owned,wanted)) rowFor(scope).resources.push({kind,...change});
       // Global changes affect Bots with no explicit local assignment too.
+      if (!targetScopeWarned && options[kind==='mcp'?'mcpScope':'skillsScope']==='agents' && options.targetAgents?.length && scopes.length &&
+          [...owned.keys()].some(scope => scope !== 'global' && !options.targetAgents.includes(scope) &&
+            (currentOptions.targetAgents?.length ? currentOptions.targetAgents.includes(scope) : true))) {
+        warn('目标范围已缩小：范围外 Bot 的托管资源库连接器或技能将撤销，账户连接器仍按各 Bot 单独配置。');
+        targetScopeWarned = true;
+      }
       const globalBefore = owned.get("global") ?? new Set(),
-        globalAfter = wanted.get("global") ?? new Set();
+        globalAfter = new Set(wanted.get("global")?.keys() ?? []);
       for (const bot of bots.filter((x) => x.runtime === "pi-agent")) {
         const before = new Set([...globalBefore, ...(owned.get(bot.id) ?? [])]),
-          after = new Set([...globalAfter, ...(wanted.get(bot.id) ?? [])]);
+          after = new Set([...globalAfter, ...(wanted.get(bot.id)?.keys() ?? [])]);
         const gained = [...after].filter((x) => !before.has(x)),
           lost = [...before].filter((x) => !after.has(x));
         if (gained.length || lost.length)
@@ -196,13 +195,21 @@ export async function buildSyncPreview({
           });
       }
     }
-  } else warn("资源库暂不可读：连接器与技能的变更预览不可用。");
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    result.blocked = true;
+    warn('资源库暂不可读：连接器与技能的变更预览不可用。');
+  }
   try {
-    for (const change of await contentChanges({ paths, state, options, bots })) {
+    for (const change of await contentChanges({ paths, state, options, bots, desired:resourceDesired, library:sourceLibrary, signal, deadline })) {
       const { scope, ...resource } = change;
       rowFor(scope).resources.push(resource);
     }
-  } catch { warn("资源内容暂不可读取，内容变化需在同步时核实。"); }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (isScanStopped(error)) result.blocked = true;
+    warn('资源内容暂不可读取，内容变化需在同步时核实。');
+  }
   for (const bot of bots) {
     const row = rowFor(bot.id);
     const target = modelTarget(options, bot.id, data.defaultModel);
@@ -232,12 +239,11 @@ export async function buildSyncPreview({
     };
   }
   const desired = options.syncMcp ? (options.accountConnectors ?? {}) : {};
-  const deadline = Date.now() + budgetMs;
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
-  const timer = setTimeout(abort, budgetMs);
+  const timer = setTimeout(abort, Math.max(0,deadline-Date.now()));
   const queue = bots.filter((bot) =>
     ["pi-agent", "claude-code", "codex"].includes(bot.runtime) &&
     (Object.keys(desired[bot.id]??{}).length>0 || Object.keys(state.accountConnectors?.[bot.id]??{}).length>0),

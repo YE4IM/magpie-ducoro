@@ -1,15 +1,11 @@
-# Ducoro 0.4.7
+# Ducoro 0.4.8
 
-## 中文
+0.4.8 统一了预览、实际同步与核验的资源规则，修复导出配置禁用连接器时撤销漏报，以及同一技能同时显示“撤销”和“更新”的问题。技能扫描支持取消与总时限，并限制目录数量、深度和内容规模；中断后通过读回核验恢复管理记录，避免重复创建或接管被外部修改的资源。完整支持中英文切换，保留草稿、选择、焦点和打开的弹窗。升级沿用现有兼容设置与管理记录，无需重新配置。
 
-Ducoro 0.4.7 带来更贴近 Magpie 的统一界面：分组式同步设置、边界清晰的 Bot 资源列表、按需展开且对齐的编辑区，以及一致的方案、状态、备份与弹窗体验。完整支持中英文并跟随宿主语言切换，保留草稿、选择与焦点；同时优化开关点击范围和错误提示，继续通过“预览并保存”审阅每次变更。升级可沿用现有兼容配置与管理记录。
+Version 0.4.8 shares resource rules across previews, synchronization and verification, fixing missing connector revocations when an exported definition is disabled and skills incorrectly shown as both removed and updated. Skill scanning supports cancellation and deadlines with directory, depth and size limits. Readback after an interruption restores management records without duplicating resources or taking over externally modified content. English and Chinese language switching preserves drafts, selections, focus and open dialogs. Compatible settings and management records carry forward without reconfiguration.
 
-## English
+发布目录已清理测试、QA、开发记录及旧打包产物，保留运行文件、界面资源、必要文档和恢复命令。GitHub Release 仅提供自动生成的 Source code，不上传额外附件。
 
-Ducoro 0.4.7 brings a more consistent Magpie-style interface, with grouped sync settings, clearly bordered Bot resource lists, aligned editors that expand on demand, and unified plans, status views, backups and dialogs. Full English and Chinese support follows the host language while preserving drafts, selections and focus. Refined switch hit areas and clearer error messages improve everyday use, while Preview and save keeps each change reviewable. Compatible settings and management records carry forward when upgrading.
+The release tree contains runtime files, UI assets, essential documentation and recovery commands, with tests, QA output, development records and old packages removed. GitHub Release provides only its automatically generated Source code, with no uploaded assets.
 
-## 升级 / Upgrade
-
-替换旧版本目录或本地安装包，重新加载插件后打开 Ducoro 页面。详细安装和维护说明见 [中文使用说明](README.zh-CN.md)。
-
-Replace the previous plugin folder or local package, reload the plugin, and reopen Ducoro. See the [English README](README.md) for installation and maintenance instructions.
+完整更新说明见 [CHANGELOG.md](CHANGELOG.md) · Full history: [CHANGELOG.md](CHANGELOG.md)

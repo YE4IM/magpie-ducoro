@@ -6,7 +6,7 @@ import { acquireSyncLock } from "./sync-lock.mjs";
 import { previewLocalRecords, cleanLocalRecords } from "./local-records.mjs";
 import { backupFileAction, openBackupDirectory, previewBackupImport, importBackupFile, previewBackupDeletion, clearBackupFiles, withBackupLock } from './backup-files.mjs';
 import { createCheckpoint, checkpoints, rollbackDraft, inspectDrift, revision, projectOptions } from "./control-center.mjs";
-import "./ui/plans.js";
+import * as Plans from "./plan-rules.mjs";
 import "./ui/i18n.js";
 const { translate, format, localizeReport, languageFor, message } =
   globalThis.DucoroI18n;
@@ -193,7 +193,7 @@ export async function createPageService({
   const token = (await readFile(tokenFile, "utf8")).trim();
   if (!/^[a-f0-9]{64}$/.test(token)) throw Error("页面令牌文件无效");
   const root = fileURLToPath(new URL("./ui/", import.meta.url));
-  const port = options.servicePort ?? 3487;
+  let port = options.servicePort ?? 3487;
   const call = async (args) => {
     const result = await run(args, { timeoutMs: 20000 });
     if (!result.ok)
@@ -333,7 +333,7 @@ export async function createPageService({
           if(value.revision && value.revision!==revision(projectOptions(options)))return reply(409,{error:'Configuration changed; reload before saving'});
           const result=await rollbackDraft(stateDir,value.id,value.selections,options);
           const loaded=await readManagedState(join(stateDir,'state.json'));
-          const next=globalThis.DucoroPlans.resolve(result.options),current=globalThis.DucoroPlans.resolve(options);
+          const next=Plans.resolve(result.options),current=Plans.resolve(options);
           // Inspect resumed and newly targeted Bots too, even when current
           // settings exclude them from normal drift reporting.
           const drift=await inspectDrift({options:{...options,connectionSlug:next.connectionSlug,pausedModels:[],targetAgents:[]},state:loaded.state,paths,run,signal:requestController.signal});
@@ -365,7 +365,7 @@ export async function createPageService({
             void (async () => {
               try {
                 const loaded = await readManagedState(join(stateDir,'state.json'));
-                const result = await verifyConfiguration({ options: globalThis.DucoroPlans.resolve(options), state: loaded.state, run, paths, report: await getReport(), onProgress: partial => { verificationJob = { ...verificationJob, ...partial }; } });
+                const result = await verifyConfiguration({ options: Plans.resolve(options), state: loaded.state, run, paths, report: await getReport(), onProgress: partial => { verificationJob = { ...verificationJob, ...partial }; } });
                 verificationJob = { ...result, running: false };
               } catch { verificationJob = { running: false, rows: [], error: 'Verification unavailable' }; }
             })();
@@ -405,7 +405,7 @@ export async function createPageService({
         }
         if (path === "api/verification" && ["GET", "POST"].includes(req.method)) {
           const loaded = await readManagedState(join(stateDir, "state.json"));
-          return reply(200, await verifyConfiguration({ options: globalThis.DucoroPlans.resolve(options), state: loaded.state, run, paths, signal: requestController.signal, report: await getReport() }));
+          return reply(200, await verifyConfiguration({ options: Plans.resolve(options), state: loaded.state, run, paths, signal: requestController.signal, report: await getReport() }));
         }
         if (path === "api/state-backups" && req.method === "GET")
           return reply(200, {backups: await stateBackups(join(stateDir,"state.json"))});
@@ -421,8 +421,7 @@ export async function createPageService({
           if(!release)return reply(409,{error:"正在同步，请完成后再操作备份。"});
           try {
             if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
-            await writeFile(join(stateDir,'restore-review.json'),JSON.stringify({pending:true,at:new Date().toISOString()}),{mode:0o600});
-            await restoreStateBackup(file,id,checksum);
+            await restoreStateBackup(file,id,checksum,{beforeRestore:()=>writeFile(join(stateDir,'restore-review.json'),JSON.stringify({pending:true,at:new Date().toISOString()}),{mode:0o600})});
           } finally {await release();}
           return reply(200,{restored:true});
         }
@@ -496,7 +495,7 @@ export async function createPageService({
             });
           if (path === "api/preview") {
             resumePreview=null;
-            const next = globalThis.DucoroPlans.resolve({ ...options, ...value });
+            const next = Plans.resolve({ ...options, ...value });
             const deadline = Date.now() + 40000;
             const signal = AbortSignal.any([
               requestController.signal,
@@ -513,7 +512,7 @@ export async function createPageService({
             const stateBefore=revision(await readManagedState(join(stateDir,'state.json')).then(x=>x.state).catch(()=>null));
             const result=await buildSyncPreview({
                 options: next,
-                currentOptions: globalThis.DucoroPlans.resolve(options),
+                currentOptions: Plans.resolve(options),
                 sourceOptions: {...options,...value},
                 data,
                 stateDir,
@@ -618,6 +617,7 @@ export async function createPageService({
       };
       const onListening = () => {
         server.removeListener("error", onError);
+        port = server.address().port;
         listening = true;
         if (warned) log("Ducoro page service reconnected");
         resolve();
@@ -629,6 +629,7 @@ export async function createPageService({
   await listen();
   server.unref();
   return {
+    get url() { return `http://127.0.0.1:${port}`; },
     get listening() {
       return listening;
     },

@@ -7,7 +7,7 @@ import { validateOptions } from './options.mjs';
 import { mapLimit } from './performance.mjs';
 import { modelEligible, modelTarget } from './model-sync.mjs';
 import { list } from './inventory-shapes.mjs';
-import './ui/plans.js';
+import * as Plans from './plan-rules.mjs';
 const defaults = globalThis.DucoroDefaultOptions;
 const maps = new Set(['botPlansCatalog','botPlans','botInstructions','modelGuards','botModels','resourceAssignments','accountConnectors','accountResolutions','modelCapabilityRefs']);
 export const stable = value => JSON.stringify(value, (_, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x);
@@ -69,7 +69,7 @@ export async function rollbackDraft(stateDir,id,selections,current) {
   return {options:draft,selections,revision:revision(projectOptions(current)),changes:optionChanges(normalized,projectOptions(draft))};
 }
 export async function inspectDrift({options,state,paths,run,signal}) {
-  const resolved=globalThis.DucoroPlans.resolve(options), rows=[];
+  const resolved=Plans.resolve(options), rows=[];
   let source;try{source=JSON.parse(await readFile(paths.bridge,'utf8'));}catch{}
   const fallback=typeof source?.model==='string'?source.model:source?.model?.id;
   const roster=await run(['agent','list'],{timeoutMs:5000,signal});
