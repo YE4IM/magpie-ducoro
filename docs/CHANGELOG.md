@@ -1,5 +1,8 @@
 ## 0.4.8
 
+- 修复首次连接：接受 CLI 成功返回的显式 JSON `null`，继续拒绝空输出及非法响应。
+- 创建连接时省略空能力映射参数，更新时保留显式清空旧映射的语义。
+
 - 统一预览、同步和核验的资源期望状态；正确预览导出配置禁用连接器后的撤销。
 - 内容比较仅检查最终仍被分配的资源，修复技能同时显示撤销与更新。
 - 共享技能扫描支持取消、总时限、目录深度及规模限制，保持既有摘要格式。
@@ -9,6 +12,9 @@
 - 发布前移除测试、QA、开发记录和旧打包产物；保留必要运行文件与恢复命令，Release 仅保留 GitHub 自动生成的 Source code。
 
 ### English
+
+- Accept an explicit JSON `null` for a missing connection while rejecting empty or malformed responses.
+- Omit empty capability references when creating a connection; preserve explicit clearing on updates.
 
 - Share resource selection and normalization across preview, execution and verification; report connector revocations when the exported definition is disabled.
 - Compare content only for resources that remain assigned, preventing a skill from appearing as both removed and updated.

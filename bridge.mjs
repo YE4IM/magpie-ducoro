@@ -401,6 +401,8 @@ const createEngine = (input = {}, options = {}) => {
   const getConnection = async (slug) => {
     const r = await run(["connections", "get", slug], { timeoutMs: 30_000 })
     if (r.ok) {
+      // Parse failures also have json: null; only the explicit JSON literal means absent.
+      if (r.json === null && r.stdout.trim() === "null") return null
       const connection = r.json?.connection ?? r.json
       if (dryRun || (connection && typeof connection === "object" && !Array.isArray(connection))) return connection
       throw new Error("connections get returned an unknown response")
@@ -409,12 +411,13 @@ const createEngine = (input = {}, options = {}) => {
     throw new Error(`connections get ${slug} failed: ${errMsg(r)}`)
   }
 
-  const connectionArgs = (want) => {
+  const connectionArgs = (want, { creating = false } = {}) => {
     const a = []
     if (want.model) a.push("--model", want.model)
     if (want.models.length) a.push("--models", want.models.join(","))
     const refs = Object.entries(want.refs)
-    a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
+    // Creation rejects empty refs; updates require an empty value to clear old refs.
+    if (refs.length || !creating) a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
     return a
   }
 
@@ -425,7 +428,7 @@ const createEngine = (input = {}, options = {}) => {
         "--slug", slug,
         "--name", want.name,
         "--base-url", want.baseUrl,
-        ...connectionArgs(want),
+        ...connectionArgs(want, { creating: true }),
         "--stdin",
       ],
       { stdin: key },
