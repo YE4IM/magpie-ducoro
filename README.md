@@ -2,9 +2,9 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-## Ducoro 0.4.8
+## Ducoro 0.4.9
 
-Version 0.4.8 fixes missing connector revocations in previews, removes contradictory skill changes, and makes skill scanning cancellable and time-bounded. Preview, sync and verification share the same resource rules. English and Chinese follow Magpie's language setting while preserving unsaved drafts, focus and open dialogs. See the [release notes](docs/RELEASE-NOTES.md).
+Version 0.4.9 publishes the plugin to the npm registry as [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro) and fixes the packaged `bin` entry so the `magpie-ducoro-status` diagnostic command works after an npm install. Synchronization logic is unchanged from 0.4.8. See the [release notes](docs/RELEASE-NOTES.md).
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro, and manage per-Bot assignments from the plugin page. Changes go through previews with confirmation before saving; failures are recorded by category with per-item retry; verification distinguishes saved settings, written configuration, readback and session loading.
 
@@ -51,11 +51,11 @@ Full history: [CHANGELOG.md](docs/CHANGELOG.md) · Release notes: [RELEASE-NOTES
 
 ## Installation
 
-Add `github:YE4IM/magpie-ducoro#v0.4.8` in Magpie's plugin settings, or download the GitHub Release's automatically generated Source code, extract it and add the folder's absolute path. You can also install the local `magpie-ducoro-0.4.8.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
+Install the npm package `magpie-ducoro` (`npm install magpie-ducoro@0.4.9`), add `github:YE4IM/magpie-ducoro#v0.4.9` in Magpie's plugin settings, or download the GitHub Release's automatically generated Source code, extract it and add the folder's absolute path. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
 Upgrading: stop the previous host, then replace the plugin path or package before loading the new version, so two versions never write the same management state. Existing settings and compatible v1/v2 records carry forward without reconfiguration.
 
-Downgrading: stop the 0.4.8 host first, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge the journal under the shared lock. After an interrupted run, recover with 0.4.8 first. Do not manually delete an uncompacted journal.
+Downgrading: stop the 0.4.9 host first, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge the journal under the shared lock. After an interrupted run, recover with 0.4.9 first. Do not manually delete an uncompacted journal.
 
 ## Page and assignments
 

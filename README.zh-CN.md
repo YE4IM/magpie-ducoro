@@ -2,12 +2,9 @@
 
 [English](README.md) | **简体中文**
 
-## Ducoro 0.4.8
+## Ducoro 0.4.9
 
-0.4.8 修复撤销预览、技能重复变化和扫描取消问题，统一资源规则，并完成新增提示及发布文档的英文国际化。完整升级说明见 [版本说明](docs/RELEASE-NOTES.md)。
-
-
-已完成中英文国际化，跟随 Magpie 语言切换，保留草稿、焦点和打开的弹窗。包含分组设置、Bot 边界及展开编辑对齐。详见 [版本升级介绍](docs/RELEASE-NOTES.md)。
+0.4.9 将插件发布到 npm 注册表（[`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro)），并修正安装包的 `bin` 入口，npm 安装后 `magpie-ducoro-status` 诊断命令可正常调用。同步逻辑与 0.4.8 一致。完整升级说明见 [版本说明](docs/RELEASE-NOTES.md)。
 
 把 Magpie 的模型、连接器、技能、指令与显式选择的子代理同步到 Ducoro，并在插件页面内按 Bot 管理分配。同步带变更预览与保存前确认；失败按类别记录并支持按项重试；配置核验区分保存、写入、读回与会话加载四个阶段。
 
@@ -54,11 +51,11 @@
 
 ## 安装
 
-在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro#v0.4.8`，或从 GitHub Release 下载自动生成的 Source code 并解压后添加文件夹的绝对路径。本地也可安装重新打包的 `magpie-ducoro-0.4.8.tgz`。从侧边栏 **Ducoro** 打开页面。需要 Magpie 支持插件页面服务，且本机已安装 `ducoro-cli` 并启动 Ducoro 后台。
+安装 npm 包 `magpie-ducoro`（`npm install magpie-ducoro@0.4.9`），在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro#v0.4.9`，或从 GitHub Release 下载自动生成的 Source code 并解压后添加文件夹的绝对路径。从侧边栏 **Ducoro** 打开页面。需要 Magpie 支持插件页面服务，且本机已安装 `ducoro-cli` 并启动 Ducoro 后台。
 
 升级：停止旧版宿主，替换插件路径或安装包后再加载新版本，避免两个版本同时写入共享管理状态。已有设置和兼容的 v1/v2 管理记录自动沿用，无需重新配置。
 
-回退：先停止 0.4.8 宿主，再在本目录执行 `npm run state:compact -- /管理记录的绝对路径/state.json`，在共用锁内合并增量日志；异常中断后先由 0.4.8 恢复记录再回退。不要手动删除尚未合并的日志。
+回退：先停止 0.4.9 宿主，再在本目录执行 `npm run state:compact -- /管理记录的绝对路径/state.json`，在共用锁内合并增量日志；异常中断后先由 0.4.9 恢复记录再回退。不要手动删除尚未合并的日志。
 
 ## 页面与分配
 

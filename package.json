@@ -1,6 +1,6 @@
 {
   "name": "magpie-ducoro",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Sync Magpie models, connectors, skills and instructions with Ducoro.",
   "author": {
     "name": "YE4IM",

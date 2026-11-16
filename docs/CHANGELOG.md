@@ -1,3 +1,13 @@
+## 0.4.9
+
+- 将插件发布到 npm 注册表（`magpie-ducoro`），修正安装包 `bin` 入口路径（移除前导 `./`），npm 安装后 `magpie-ducoro-status` 诊断命令可正常调用。
+- 安装文档新增 npm 包来源；同步逻辑、页面行为与管理记录格式无变化。
+
+### English
+
+- Publish the plugin to the npm registry as `magpie-ducoro` and fix the packaged `bin` entry path (drop the leading `./`) so the `magpie-ducoro-status` diagnostic command works after an npm install.
+- Document the npm package as an installation source. Synchronization logic, page behavior and management record formats are unchanged.
+
 ## 0.4.8
 
 - 修复首次连接：接受 CLI 成功返回的显式 JSON `null`，继续拒绝空输出及非法响应。
