@@ -1,3 +1,4 @@
+import { acquireSyncLock } from "./sync-lock.mjs";
 import { previewLocalRecords, cleanLocalRecords } from "./local-records.mjs";
 import { openBackupDirectory, previewBackupImport, importBackupFile, previewBackupDeletion, clearBackupFiles, withBackupLock } from './backup-files.mjs';
 import { createCheckpoint, checkpoints, rollbackDraft, inspectDrift, revision, projectOptions } from "./control-center.mjs";
@@ -193,6 +194,7 @@ export async function createPageService({
     return result.json;
   };
   let verificationJob = null;
+  let inventorySnapshot = null;
   let capabilityFlight = null;
   let capabilityCache = null,
     capabilityTime = 0;
@@ -254,7 +256,7 @@ export async function createPageService({
           res.setHeader("Access-Control-Allow-Methods", "GET, POST");
           res.setHeader(
             "Access-Control-Allow-Headers",
-            "X-Ducoro-Token, X-Ducoro-Language, Content-Type",
+            "X-Ducoro-Token, X-Ducoro-Language, X-Ducoro-Inventory, Content-Type",
           );
           return reply(204, "", "text/plain");
         }
@@ -263,13 +265,12 @@ export async function createPageService({
         if ((req.method === 'GET' && path === 'api/local-records') || (req.method === 'POST' && path === 'api/local-records/clean')) {
           let body='';
           if(req.method==='POST')for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096)return reply(413,{error:'请求过大'});}
-          const lock=join(stateDir,'sync.lock');
-          try {await mkdir(lock);}catch(e){if(e.code==='EEXIST')return reply(409,{error:'正在同步，请完成后再清理本地记录。'});throw e;}
+          const release=await acquireSyncLock(stateDir);
+          if(!release)return reply(409,{error:'正在同步，请完成后再清理本地记录。'});
           let result, failure;
           try {
-            await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid}));
             result=req.method==='GET'?await previewLocalRecords(stateDir):await cleanLocalRecords(stateDir,JSON.parse(body).token);
-          }catch(error){failure=error;}finally{await rm(lock,{recursive:true,force:true});}
+          }catch(error){failure=error;}finally{await release();}
           if(failure) {
             // Only authored public messages may cross the page API boundary.
             const publicErrors={
@@ -371,7 +372,9 @@ export async function createPageService({
             }),
             getCapabilities(),
           ]);
-          return reply(200, { ...data, capabilities });
+          const inventoryToken = randomBytes(16).toString('hex');
+          inventorySnapshot = {token:inventoryToken, data:structuredClone(data), language, slug:options.connectionSlug, at:Date.now()};
+          return reply(200, { ...data, capabilities, inventoryToken });
         }
         if (path === "api/verification" && ["GET", "POST"].includes(req.method)) {
           const loaded = await readManagedState(join(stateDir, "state.json"));
@@ -389,12 +392,12 @@ export async function createPageService({
             return reply(200,preview);
           }
           // Share the writer lock with normal synchronization.
-          const lock=join(stateDir,"sync.lock");
-          try {await mkdir(lock);}catch {return reply(409,{error:"正在同步，请完成后再操作备份。"});}
+          const release=await acquireSyncLock(stateDir);
+          if(!release)return reply(409,{error:"正在同步，请完成后再操作备份。"});
           try {
             if (path.endsWith("delete")) return reply(200, await deleteStateBackup(file,id,checksum));
             await restoreStateBackup(file,id,checksum);
-          } finally {await rm(lock,{recursive:true,force:true});}
+          } finally {await release();}
           return reply(200,{restored:true});
         }
         if (req.method === "GET" && path === "api/report")
@@ -468,7 +471,8 @@ export async function createPageService({
               AbortSignal.timeout(40000),
             ]);
             const [data, capabilities] = await Promise.all([
-              inventory({ options: next, paths, run, language, signal }),
+              req.headers['x-ducoro-inventory'] === inventorySnapshot?.token && Date.now()-inventorySnapshot.at < 15000 && inventorySnapshot.language===language && inventorySnapshot.slug===next.connectionSlug
+                ? Promise.resolve(structuredClone(inventorySnapshot.data)) : inventory({ options: next, paths, run, language, signal }),
               getCapabilities(),
             ]);
             if (signal.aborted)
@@ -504,6 +508,7 @@ export async function createPageService({
           "style.css",
           "app.js",
           "model.js",
+          "defaults.js",
           "service-bridge.js",
           "resources.js",
           "reliability.js",

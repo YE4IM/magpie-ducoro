@@ -1,3 +1,7 @@
+import { acquireSyncLock } from "./sync-lock.mjs"
+import { DEFAULTS } from "./defaults.mjs"
+export { DEFAULTS } from "./defaults.mjs"
+import { defHash } from './resource-fingerprint.mjs'
 import { maintainLocalRecords } from "./local-records.mjs"
 import { createSkillArtifacts } from "./skill-artifacts.mjs"
 import { createOperationStore } from "./operation-store.mjs"
@@ -53,7 +57,7 @@ import { pathToFileURL } from "node:url"
 
 import { createTotalSync } from "./total.mjs"
 import { createModelSync } from "./model-sync.mjs"
-import { OFFICIAL_PROVIDERS, resolveCapabilityMappings, createCapabilityCatalog } from "./model-capabilities.mjs"
+import { resolveCapabilityMappings, createCapabilityCatalog } from "./model-capabilities.mjs"
 import { mcpCommand, needsResourceTargets, planResourceScopes, scopedLibrary, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
 import { createDiagnostics, removeLegacyReports } from "./diagnostics.mjs"
 import { validateOptions } from "./options.mjs"
@@ -69,41 +73,6 @@ const DEFAULT_PATHS = {
   bridge: join(HOME, ".ducoro", "magpie-agent.json"),
   mcp: join(HOME, ".ducoro", "magpie-mcp.json"),
   skills: join(HOME, ".ducoro", "magpie-skills"),
-}
-
-export const DEFAULTS = {
-  botPlansCatalog: {}, botPlans: {}, botInstructions: {}, pausedModels: [], modelGuards: {},
-  cli: "ducoro-cli",
-  servicePort: 3487,
-  modelScope: "global",
-  botModels: {},
-  accountConnectors: {},
-  accountResolutions: {},
-  connectionSlug: "magpie-ducoro",
-  connectionName: "Magpie gateway",
-  syncConnection: true,
-  syncAgentModels: true,
-  officialProviders: OFFICIAL_PROVIDERS,
-  modelCapabilityRefs: {},
-  syncMcp: true,
-  mcpScope: "global", // "global" or "agents"
-  syncSkills: true,
-  syncInstructions: true,
-  syncSubagents: true,
-  targetAgents: [],
-  subagentNames: [],
-  resourceAssignments: {},
-  syncLibraryMcp: true,
-  // Legacy options are only used to identify an old owned aggregate for removal.
-  syncPluginTools: false,
-  mcpToolsSlug: "magpie-tools",
-  mcpToolsName: "Magpie plugin tools",
-  mcpPrefix: "magpie-",
-  skillsScope: "global", // "global", "agents", or an exact Bot id
-  prune: true,
-  onDisconnect: "keep", // "keep" | "remove"
-  intervalMs: 120_000,
-  dryRun: false,
 }
 
 // ---------------------------------------------------------------- helpers
@@ -176,29 +145,6 @@ const mapServer = (name, def, prefix) => {
     return { slug, name, transport: "stdio", command: String(def.command), args, env, url: null, headers: [] }
   }
   return null
-}
-
-const defHash = (def) => {
-  // env/headers are key-value maps: hash them order-insensitively; args keep
-  // their order (it is semantic).
-  const canon = (pairs) =>
-    JSON.stringify(
-      (pairs ?? [])
-        .map(([k, v]) => [k, v])
-        .sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)),
-    )
-  return sha256(
-    JSON.stringify({
-      name: def.name,
-      transport: def.transport,
-      command: def.command,
-      args: def.args,
-      url: def.url,
-      headers: canon(def.headers),
-      env: canon(def.env),
-      disabledTools: [...(def.disabledTools ?? [])].sort(),
-    }),
-  )
 }
 
 // SKILL.md frontmatter name, falling back to the directory name
@@ -851,8 +797,11 @@ const createEngine = (input = {}, options = {}) => {
       const hash = defHash(def)
       const mine = state.mcp[id]
       const changed = !layer.has(slug) || mine?.hash !== hash
-      const operation = await operations.begin('mcp',scope,slug,hash,['revoke-mcp'])
-      if (!operation) continue
+      const operation = await operations.begin('mcp',scope,slug,hash,['revoke-mcp'],!changed)
+      if (!operation) {
+        if (forceMcpProbe || layer.get(slug)?.connectionStatus !== 'connected') pendingMcpProbes.set(id, {scope,slug,roundId:diagnostics.token()});
+        continue
+      }
       if (changed && !(await materializeSecrets(def))) {
         await operations.finish(operation,false)
         log(`mcp ${slug} (${scope}) skipped: could not store its credential`)
@@ -863,7 +812,7 @@ const createEngine = (input = {}, options = {}) => {
         const r = layer.has(slug) ? await updateMcpServer(scope, slug, def) : await addMcpServer(scope, def)
         if (r.ok) {
           state.mcp[id] = { scope, slug, hash, sourceName: source.name }
-          await operations.finish(operation)
+          await operations.finish(operation,true,[['mcp',id]])
           await saveState()
           pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
         } else {
@@ -1097,9 +1046,12 @@ const createEngine = (input = {}, options = {}) => {
           requestRetry("skill-conflict")
           continue
         }
-        if (mine?.hash === hash && existing.has(name)) { const op=await operations.begin('skills',scope,name,hash,['revoke-skills']); await operations.finish(op); continue }
+        if (mine?.hash === hash && existing.has(name)) { const op=await operations.begin('skills',scope,name,hash,['revoke-skills'],true); await operations.finish(op); continue }
         const operation = await operations.begin('skills', scope, name, hash, ['revoke-skills'])
-        if (!operation) continue
+        if (!operation) {
+        if (forceMcpProbe || layer.get(slug)?.connectionStatus !== 'connected') pendingMcpProbes.set(id, {scope,slug,roundId:diagnostics.token()});
+        continue
+      }
         try {
           const staged = await artifacts.prepare(name, bundle)
           if (mine && existing.has(name)) {
@@ -1336,29 +1288,11 @@ const createEngine = (input = {}, options = {}) => {
     if (syncing || stopped) return false
     syncing = true
     if (!watching || reason === "interval" || reason === "startup" || reason === "page-retry") invalidateSkillCache()
-    const lock = join(stateDir, "sync.lock")
-    let locked = false
+    let releaseLock;
     try {
       if (!dryRun) {
-        await mkdir(stateDir, { recursive: true })
-        try {
-          await mkdir(lock)
-        } catch (e) {
-          if (e.code !== "EEXIST") throw e
-          const owner = await readJson(join(lock, "owner.json"))
-          let stale = false
-          if (Number.isInteger(owner?.pid) && owner.pid > 0) {
-            try { process.kill(owner.pid, 0) } catch (err) { stale = err.code === "ESRCH" }
-          } else {
-            const info = await stat(lock).catch(() => null)
-            stale = info && Date.now() - info.mtimeMs > 60_000
-          }
-          if (!stale) return false
-          await rm(lock, { recursive: true, force: true })
-          await mkdir(lock)
-        }
-        locked = true
-        await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: process.pid }))
+        releaseLock = await acquireSyncLock(stateDir,{recover:true});
+        if (!releaseLock) return false;
       }
       const changes = dirtyFeatures; dirtyFeatures = new Set()
       const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
@@ -1387,7 +1321,7 @@ const createEngine = (input = {}, options = {}) => {
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
-      if (locked) await rm(lock, { recursive: true, force: true })
+      if (releaseLock) await releaseLock()
       progress.end({ ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
       syncing = false
       // Probing remote servers must not hold the mutation lock or delay a
@@ -1605,7 +1539,7 @@ const createEngine = (input = {}, options = {}) => {
       let delay = 1000
       try { fallbackRequired = watchDegraded; delay = await poll() } catch { /* Next scan retries without interrupting gateway reads. */ }
       if (watching && generation === lifecycleGeneration) {
-        watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 30000)
+        watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 300000)
         watchFallback.unref?.()
       }
     }

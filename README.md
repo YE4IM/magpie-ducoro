@@ -1,6 +1,8 @@
-# Ducoro 0.4.3
+**English** | [简体中文](README.zh-CN.md)
 
-Version 0.4.3 focuses on sync efficiency, reliability, and backup management. Shared skill caching, deduplicated reads, incremental saves, and per-target retries reduce repeated work and disk writes when syncing multiple Bots, while stronger cancellation, timeout handling, and recovery improve resilience. A centralized backup page brings together management-record backups and configuration checkpoints, with external backup import, restore previews, selective configuration rollback, and local record cleanup. This release also refines sync diagnostics, English and Chinese interfaces, and narrow-screen layouts, and fixes diagnostic state being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
+# Ducoro 0.4.4
+
+Version 0.4.4 focuses on sync efficiency, reliability, and backup management. Shared skill caching, deduplicated reads, incremental saves, and per-target retries reduce repeated work and disk writes when syncing multiple Bots, while stronger cancellation, timeout handling, and recovery improve resilience. A centralized backup page brings together management-record backups and configuration checkpoints, with external backup import, restore previews, selective configuration rollback, and local record cleanup. This release also refines sync diagnostics, English and Chinese interfaces, and narrow-screen layouts, and fixes diagnostic state being lost during incremental sync. Existing settings and management records carry forward without reconfiguration.
 
 ## Import and clear local backups
 
@@ -16,11 +18,11 @@ Sync Magpie models, connectors, skills, instructions and explicitly selected sub
 
 ## Installation
 
-Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.3.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
+Add this folder's absolute path in Magpie's plugin settings, or install the local `magpie-ducoro-0.4.4.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
 Replace the previous plugin path or package when upgrading. Keep existing management records and assignments; do not enable two versions simultaneously.
 
-## What's new in 0.4.3
+## What's new in 0.4.4
 
 - **Shared skill artifacts:** prepare and validate each skill name/content version once, then reuse it for authorized Bots. Each target retains its own permission checks, import and replacement recovery.
 - **Incremental state storage:** append small changes to `state.json.journal`, with sequence numbers, checksums and durable writes. Compact into a snapshot after 128 records or at 1 MiB. Small changes remain journaled across sync rounds; explicit maintenance can also compact them. Keep up to five state backups.
@@ -29,7 +31,7 @@ Replace the previous plugin path or package when upgrading. Keep existing manage
 - **Bounded retention:** retain up to 500 completed operation records and reclaim unused skill caches older than seven days after sync. Configuration checkpoints retain their existing 20-item limit and are not deleted by this cleanup action.
 - **English and Chinese:** cleanup previews, confirmations, results and errors follow the host language. Switching languages preserves open dialogs and preview values. Bot names, resource names and technical identifiers are unchanged.
 
-Stop the old plugin host before loading 0.4.3; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, stop the 0.4.3 host, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge its journal under the shared lock. After an interrupted run, recover with 0.4.3 first. Do not manually delete an uncompacted journal.
+Stop the old plugin host before loading 0.4.4; both versions must not write the same management state concurrently. Existing v1/v2 records migrate automatically. Before downgrading, stop the 0.4.4 host, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge its journal under the shared lock. After an interrupted run, recover with 0.4.4 first. Do not manually delete an uncompacted journal.
 
 
 ## Features introduced in 0.4.2

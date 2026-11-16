@@ -1,4 +1,4 @@
-import { OFFICIAL_PROVIDERS } from "./model-capabilities.mjs";
+import { DEFAULTS } from "./defaults.mjs";
 import { readFile, writeFile, mkdir, readdir, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,7 +7,7 @@ import { mapLimit } from './performance.mjs';
 import { modelEligible, modelTarget } from './model-sync.mjs';
 import { list } from './inventory-shapes.mjs';
 import './ui/plans.js';
-const defaults = { botPlansCatalog:{},botPlans:{},botInstructions:{},pausedModels:[],modelGuards:{},botModels:{},resourceAssignments:{},accountConnectors:{},accountResolutions:{},modelScope:'global',mcpScope:'global',skillsScope:'global',syncConnection:true,syncAgentModels:true,syncMcp:true,syncSkills:true,syncInstructions:true,syncSubagents:true,subagentNames:[],targetAgents:[],modelCapabilityRefs:{},officialProviders:OFFICIAL_PROVIDERS,prune:true,onDisconnect:'keep',connectionSlug:'magpie-ducoro' };
+const defaults = globalThis.DucoroDefaultOptions;
 const maps = new Set(['botPlansCatalog','botPlans','botInstructions','modelGuards','botModels','resourceAssignments','accountConnectors','accountResolutions','modelCapabilityRefs']);
 export const stable = value => JSON.stringify(value, (_, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x);
 export const revision = value => createHash('sha256').update(stable(value) ?? 'undefined').digest('hex');

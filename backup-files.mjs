@@ -1,3 +1,4 @@
+import { acquireSyncLock } from "./sync-lock.mjs";
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
@@ -98,12 +99,9 @@ export async function clearBackupFiles(stateDir,kind,token) {
 }
 // All callers, including checkpoint creation, share the sync writer lock.
 export async function withBackupLock(stateDir,work) {
-  await mkdir(stateDir,{recursive:true,mode:0o700});
-  const lock=join(stateDir,'sync.lock');
-  try { await mkdir(lock); }
-  catch(error) { if(error.code==='EEXIST')throw fail('正在同步，请完成后再操作备份。',409);throw error; }
-  try { await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid}),{mode:0o600});return await work(); }
-  finally { await rm(lock,{recursive:true,force:true}); }
+  const release=await acquireSyncLock(stateDir);
+  if(!release)throw fail('正在同步，请完成后再操作备份。',409);
+  try {return await work();} finally {await release();}
 }
 
 export async function openBackupDirectory(stateDir,kind,{platform=process.platform,run=promisify(execFile)}={}) {

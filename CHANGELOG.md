@@ -1,3 +1,21 @@
+## 0.4.4 — 2026-11-09
+
+- 修复连接器摘要长度不一致造成的预览误报，统一指令及子代理目标选择。
+- 方案编辑中的 Bot 勾选在列表刷新及语言切换后保留。
+- 已核对且内容未变的资源不再产生操作日志写入；失败或缺失资源仍可重试。
+- 自动预览短时复用本次清单，手动及保存前预览重新读取；正常完整扫描改为每五分钟，降级时保持快速轮询。
+- 导入时校验操作恢复记录的时间、版本摘要、次数与依赖字段。
+- 统一资源指纹、配置默认值与同步锁；开发目录保留回归测试，安装包不包含测试。
+- 保持中英文文案及动态语言切换，更新页面和诊断版本号。
+
+- Fix false connector updates and align instruction/subagent target selection with synchronization.
+- Preserve plan target selections across inventory refreshes and language changes.
+- Avoid durable operation writes for verified unchanged resources; reconcile missing resources during retries.
+- Reuse inventory only for the immediate automatic comparison. Explicit and pre-save previews always read again.
+- Reduce healthy full scans to five-minute intervals, retaining fast degraded polling.
+- Validate operation timestamps, revision hashes, attempts and dependencies before backup import.
+- Share fingerprints, defaults and mutation locks, and retain development regression tests outside the install package.
+
 ## 0.4.3 — 2026-11-08
 
 0.4.3 聚焦同步效率、运行稳定性与备份管理。通过共享技能缓存、合并重复读取、增量保存和按目标重试，减少多 Bot 同步中的重复处理与磁盘写入，并完善任务取消、命令超时及异常恢复。新版集中提供管理记录备份与配置检查点，支持外部备份导入、恢复预览、选择性配置回退和本地记录清理；同时优化同步诊断、中英文界面与窄屏布局，修复增量同步时诊断状态丢失等问题。升级沿用现有设置和管理记录，无需重新配置。

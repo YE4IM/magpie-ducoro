@@ -1,6 +1,7 @@
 // Total's additional resources. Never execute hook commands as a substitute
 // for runtime events: a filesystem notification is not a tool/session event.
 import { readFile, writeFile, mkdir, rename, rm, realpath, lstat } from 'node:fs/promises'
+import { totalTargets } from './resource-fingerprint.mjs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
@@ -96,9 +97,7 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
       if (active || hasOwned) {
         const all = list(await call(['agent', 'list']))
         if (!Array.isArray(all)) throw Error('unrecognized Ducoro Bot list response')
-        const targets = all.filter(a => Array.isArray(opts.targetAgents) && opts.targetAgents.length
-          ? opts.targetAgents.includes(a.id)
-          : a.modelPreference?.connectionSlug === opts.connectionSlug)
+        const targets = totalTargets(all, opts)
         const ids = new Set(targets.map(a => a.id))
         report.targets = [...ids]
         if (active && !targets.length) report.errors.push({ resource: 'targets', message: 'No target Bots: bind a Bot to the Magpie connection or configure targetAgents.' })
@@ -116,8 +115,7 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
           } catch (e) { instructionReady = false; problem(report, 'instructions', e.message) }
         }
         for (const id of new Set([...ids, ...Object.keys(owned.profiles)])) {
-          const operation = operations ? await operations.begin('total',id,'instructions',{selected:ids.has(id),instructionReady,instructionText,enabled:opts.syncInstructions,extra:opts.botInstructions?.[id]}) : true
-          if (!operation) continue
+          let operation;
           try {
             if (instructionOn && ids.has(id) && !instructionReady) { await operations?.finish(operation,false); continue }
             const bot = await call(['agent', 'get', id])
@@ -126,6 +124,8 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
             const entry = owned.profiles[id]
             const previous = entry?.pending && record.profile.includes(entry.pending) ? entry.pending : entry?.block
             const next = mergeInstructions(record.profile, previous, opts.syncInstructions && ids.has(id) ? [instructionOn ? instructionText : "", opts.botInstructions?.[id] ?? ""].filter(Boolean).join("\n\n") : '')
+            operation = operations ? await operations.begin('total',id,'instructions',{selected:ids.has(id),instructionReady,instructionText,enabled:opts.syncInstructions,extra:opts.botInstructions?.[id]},[],record.profile===next.profile && !entry?.pending && (entry?.block??'')===next.block) : true
+            if (!operation) continue
             if (record.profile !== next.profile) {
               // Save the intended block before the RPC. After a lost response,
               // either the old or new exact block is recognizable on retry.
@@ -166,8 +166,7 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
           }
           for (const [key, content] of wanted) {
             if (content === null) continue
-            const operation = operations ? await operations.begin('total',key.split('/')[0],`subagent:${key}`,content,['local-daemon']) : true
-            if (!operation) continue
+            let operation;
             try {
               const [botId, name] = key.split('/')
               const dir = await safeDirectory(home, botId)
@@ -175,6 +174,8 @@ export function createTotalSync({ operations, opts, paths, run, save, getState, 
               const current = await readOptional(path)
               const old = owned.files[key]
               if (current !== null && ((await lstat(path)).isSymbolicLink() || !old || ![old.hash, old.pending].includes(hash(current)))) throw Error('subagent file belongs to user or was edited; retained')
+              operation = operations ? await operations.begin('total',key.split('/')[0],`subagent:${key}`,content,['local-daemon'],current===content && !old?.pending && old?.hash===hash(content)) : true
+              if (!operation) continue
               if (current !== content) {
                 owned.files[key] = { botId, name, hash: old?.hash ?? hash(content), pending: hash(content) }
                 await save()

@@ -14,18 +14,7 @@ const SWITCHES = [
   ['syncInstructions', t('指令'), t('同步到目标 Bot 的指令区块')],
   ['syncSubagents', t('子代理'), t('同步显式选择的角色定义')],
 ]
-const DEFAULT_OPTIONS = {
-  botPlansCatalog: {}, botPlans: {}, botInstructions: {}, pausedModels: [], modelGuards: {},
-  connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
-  syncMcp: true, syncSkills: true, syncInstructions: true, syncSubagents: true,
-  prune: true, onDisconnect: 'keep', targetAgents: [], subagentNames: [],
-  modelScope: 'global', botModels: {}, accountConnectors: {}, accountResolutions: {},
-  mcpScope: 'global', skillsScope: 'global', resourceAssignments: {},
-  modelCapabilityRefs: {}, officialProviders: [
-    'zai', 'zai-coding-cn', 'kimi-coding', 'moonshotai', 'moonshotai-cn',
-    'anthropic', 'openai', 'google', 'deepseek', 'xai', 'minimax', 'minimax-cn', 'alibaba', 'alibaba-cn',
-  ],
-}
+const DEFAULT_OPTIONS = structuredClone(globalThis.DucoroDefaultOptions);
 const EDITABLE_KEYS = Object.keys(DEFAULT_OPTIONS)
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const botId = value => typeof value === 'string' && /^agt-[a-zA-Z0-9-]+$/.test(value)

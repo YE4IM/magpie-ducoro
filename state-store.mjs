@@ -16,7 +16,15 @@ export function validateState(raw) {
       { code: "state-version" },
     );
   if(raw._journalSeq !== undefined && (!Number.isSafeInteger(raw._journalSeq)||raw._journalSeq<0))throw Error('管理记录序号无效');
-  if(raw.operations !== undefined && (!object(raw.operations)||Object.values(raw.operations).some(row=>!object(row)||!['running','failed','completed'].includes(row.status))))throw Error('操作恢复记录损坏');
+  if (raw.operations !== undefined && (!object(raw.operations) || Object.values(raw.operations).some(row =>
+    !object(row) || !['running','failed','completed'].includes(row.status) ||
+    !['feature','target','resource'].every(key => typeof row[key] === 'string' && row[key].length > 0) ||
+    typeof row.revision !== 'string' || !/^[a-f0-9]{64}$/.test(row.revision) ||
+    !Number.isSafeInteger(row.attempts) || row.attempts < 1 ||
+    typeof row.updatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.updatedAt) ||
+    !Number.isFinite(Date.parse(row.updatedAt)) ||
+    !Array.isArray(row.dependencies) || !row.dependencies.every(value => typeof value === 'string')
+  ))) throw Error('操作恢复记录损坏');
   for (const key of ["mcp", "skills", "accountConnectors"])
     if (raw[key] !== undefined && !object(raw[key]))
       throw Error("管理记录格式损坏");

@@ -14,14 +14,15 @@
   const fields=el('div');fields.className='field-grid';fields.append(name.wrap,model.wrap,mcp.wrap,skills.wrap,instructions.wrap);plans.append(fields);
   const targets=el('div');targets.className='plan-targets';plans.append(el('p',t('选择继承此方案的 Bot')),targets);
   let selected='';
+  let targetDraft = null;
   function refreshPlans(){
     if(!globalThis.DucoroWorkspace?.ready())return;
     const draft=DucoroWorkspace.collect();choices.replaceChildren();const fresh=el('option',t('新建方案'));fresh.value='';choices.append(fresh);
     for(const [id,p] of Object.entries(draft.botPlansCatalog??{})){const option=el('option',p.name??id);option.value=id;choices.append(option);}
     choices.value=selected;
-    targets.replaceChildren();for(const bot of DucoroResources.bots??[]){const row=el('label'),check=el('input');check.type='checkbox';check.value=bot.id;check.checked=!!selected&&draft.botPlans?.[bot.id]===selected;row.append(check,el('span',bot.name));targets.append(row);}
+    targets.replaceChildren();for(const bot of DucoroResources.bots??[]){const row=el('label'),check=el('input');check.type='checkbox';check.value=bot.id;check.checked=targetDraft ? targetDraft.has(bot.id) : !!selected&&draft.botPlans?.[bot.id]===selected;check.onchange=()=>{targetDraft=new Set([...targets.querySelectorAll('input:checked')].map(x=>x.value));};row.append(check,el('span',bot.name));targets.append(row);}
   }
-  choices.onchange=()=>{selected=choices.value;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';refreshPlans();};
+  choices.onchange=()=>{selected=choices.value;targetDraft=null;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';refreshPlans();};
   plans.append(actions(button(t('更新方案草稿'),()=>{
     if(!name.input.value.trim())throw DucoroI18n.error(t('请填写方案名称'));
     const draft=DucoroWorkspace.collect(),id=selected||`plan-${crypto.randomUUID().slice(0,8)}`;

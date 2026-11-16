@@ -760,7 +760,7 @@
           );
           try {
             const nextComparison = await ducoroApi("preview", snapshot, {
-              signal,
+              inventoryToken: next.inventoryToken, signal,
             });
             if (request !== requestId || revision !== draftRevision) return;
             comparison = nextComparison;
