@@ -1,3 +1,5 @@
+[English](README.md) | **简体中文**
+
 # Ducoro 0.4.2
 
 将 Magpie 的模型、连接器、技能、指令与选定子代理同步到 Ducoro，并在插件页面按 Bot 分配资源。

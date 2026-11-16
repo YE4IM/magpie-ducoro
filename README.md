@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Ducoro 0.4.2
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro. Manage assignments for individual Bots from the plugin page.
