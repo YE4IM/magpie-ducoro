@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-# Ducoro 0.4.8
+## Ducoro 0.4.8
 
 Version 0.4.8 fixes missing connector revocations in previews, removes contradictory skill changes, and makes skill scanning cancellable and time-bounded. Preview, sync and verification share the same resource rules. English and Chinese follow Magpie's language setting while preserving unsaved drafts, focus and open dialogs. See the [release notes](docs/RELEASE-NOTES.md).
 
