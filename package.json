@@ -2,6 +2,18 @@
   "name": "magpie-ducoro",
   "version": "0.4.8",
   "description": "Sync Magpie models, connectors, skills and instructions with Ducoro.",
+  "author": {
+    "name": "YE4IM",
+    "url": "https://github.com/YE4IM"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YE4IM/magpie-ducoro-plugin.git"
+  },
+  "homepage": "https://github.com/YE4IM/magpie-ducoro-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/YE4IM/magpie-ducoro-plugin/issues"
+  },
   "type": "module",
   "main": "./bridge.mjs",
   "keywords": [
