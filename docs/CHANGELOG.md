@@ -1,3 +1,13 @@
+## 0.4.10
+
+- 完善 npm 中英文说明：通过 Magpie 添加插件的正确命令、运行前提、首次预览保存与诊断流程，以及兼容性验证边界。
+- 将安装步骤提前，区分 npm 下载与 Magpie 插件注册；同步行为与管理记录格式不变。
+
+### English
+
+- Improve the bilingual npm guide with the correct Magpie installation command, prerequisites, first-use preview/save and diagnostic steps, and compatibility verification limits.
+- Move installation before the feature reference and distinguish npm downloads from Magpie plugin registration. Synchronization behavior and management record formats are unchanged.
+
 ## 0.4.9
 
 - 将插件发布到 npm 注册表（`magpie-ducoro`），修正安装包 `bin` 入口路径（移除前导 `./`），npm 安装后 `magpie-ducoro-status` 诊断命令可正常调用。

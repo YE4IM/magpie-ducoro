@@ -1,11 +1,11 @@
-# Ducoro 0.4.9
+# Ducoro 0.4.10
 
-0.4.9 将插件发布到 npm 注册表（[`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro)），并修正安装包的 `bin` 入口路径（移除前导 `./`）：通过 npm 安装后，`magpie-ducoro-status` 诊断命令可正常调用。同步逻辑、页面行为与管理记录格式均无变化。
+0.4.10 完善 npm 包 [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro) 的中英文说明：安装步骤提前，明确通过 Magpie 添加插件的命令、Ducoro CLI 与后台服务要求、首次预览保存和诊断流程，以及尚未验证的兼容性范围。同步行为和管理记录格式与 0.4.9 一致。
 
-Version 0.4.9 publishes the plugin to the npm registry as [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro) and fixes the packaged `bin` entry path (dropping the leading `./`) so the `magpie-ducoro-status` diagnostic command works after an npm install. Synchronization logic, page behavior and management record formats are unchanged.
+Version 0.4.10 improves the bilingual documentation for the npm package [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro): installation comes first, with the Magpie plugin-add command, Ducoro CLI and background-service requirements, first-use preview/save and diagnostic steps, and compatibility verification limits. Synchronization behavior and management record formats are unchanged from 0.4.9.
 
-安装方式：`npm install magpie-ducoro@0.4.9`、在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro#v0.4.9`，或下载 GitHub Release 自动生成的 Source code 解压后添加绝对路径。升级沿用现有兼容设置与管理记录，无需重新配置。GitHub Release 仅提供自动生成的 Source code，不上传额外附件。
+在 Magpie 的「插件 → 添加插件」中输入 `magpie-ducoro@0.4.10`，或运行 `magpie plugin add magpie-ducoro@0.4.10`。单独执行 `npm install` 不会将插件注册到 Magpie。升级沿用已有兼容设置与管理记录；请先停止旧版宿主。
 
-Installation: `npm install magpie-ducoro@0.4.9`, add `github:YE4IM/magpie-ducoro#v0.4.9` in Magpie's plugin settings, or download the GitHub Release's automatically generated Source code and add the extracted folder's absolute path. Compatible settings and management records carry forward without reconfiguration. GitHub Release provides only its automatically generated Source code, with no uploaded assets.
+Enter `magpie-ducoro@0.4.10` in Magpie's **Plugins → Add a plugin**, or run `magpie plugin add magpie-ducoro@0.4.10`. An `npm install` alone does not register the plugin with Magpie. Compatible settings and management records carry forward; stop the previous host before upgrading.
 
 完整更新说明见 [CHANGELOG.md](CHANGELOG.md) · Full history: [CHANGELOG.md](CHANGELOG.md)

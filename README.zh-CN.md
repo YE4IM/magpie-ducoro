@@ -1,14 +1,49 @@
-# Magpie-Ducoro-Plugin
+# magpie-ducoro 0.4.10
 
-[English](README.md) | **简体中文**
+[English](https://github.com/YE4IM/magpie-ducoro/blob/main/README.md) | **简体中文**
 
-## Ducoro 0.4.9
-
-0.4.9 将插件发布到 npm 注册表（[`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro)），并修正安装包的 `bin` 入口，npm 安装后 `magpie-ducoro-status` 诊断命令可正常调用。同步逻辑与 0.4.8 一致。完整升级说明见 [版本说明](docs/RELEASE-NOTES.md)。
+0.4.10 完善 npm 安装说明、首次使用步骤与兼容性说明，同步行为和管理记录格式与 0.4.9 一致。npm 包名为 [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro)。
 
 把 Magpie 的模型、连接器、技能、指令与显式选择的子代理同步到 Ducoro，并在插件页面内按 Bot 管理分配。同步带变更预览与保存前确认；失败按类别记录并支持按项重试；配置核验区分保存、写入、读回与会话加载四个阶段。
 
 完整版本历史见 [CHANGELOG.md](docs/CHANGELOG.md)，本次升级说明见 [RELEASE-NOTES.md](docs/RELEASE-NOTES.md)。
+
+## 运行前提
+
+- 安装支持插件 Agent 与页面服务的 [Magpie](https://usemagpie.ai)（`magpie.agent`、`magpie.page.service`）。
+- 安装并登录 [Ducoro](https://ducoro.ai)，启动其后台服务；安装 [CLI](https://ducoro.ai/download/cli)，确保启动 Magpie 时的 PATH 能找到 `ducoro-cli`。
+- 当前账户能够访问要管理的本地 Ducoro 设备与 Bot。插件页面服务默认使用 `127.0.0.1:3487`；端口被占用时修改 `servicePort`。
+
+本插件不会自动安装 Ducoro 或 CLI。目前未确定 Magpie 与 Ducoro 的精确最低版本。本次文档发布不新增端到端同步验收结论，也不声明已验证 Windows/Linux 兼容性；使用前请确认当前平台的 CLI 与页面服务支持情况。
+
+## 安装
+
+在 Magpie 的「插件 → 添加插件」中输入 `magpie-ducoro@0.4.10`。也可使用 Magpie 命令行：
+
+```sh
+magpie plugin add magpie-ducoro@0.4.10
+```
+
+`npm install magpie-ducoro` 只会把包下载到 npm 项目中，不会自动将插件注册到 Magpie。正常使用请通过上面的 Magpie 命令或插件对话框安装。
+
+源码安装：从 [GitHub Releases](https://github.com/YE4IM/magpie-ducoro/releases) 下载某个版本，解压后在 Magpie 中添加文件夹的绝对路径。也可添加 GitHub 版本 `github:YE4IM/magpie-ducoro#v0.4.10`。
+
+### 首次使用
+
+1. 从 Magpie 侧边栏打开 **Ducoro**。页面不可用时，检查 `ducoro-cli`、后台服务与页面服务端口。
+2. 在「同步设置」核对连接标识、启用的资源类型与目标 Bot；将要交给 Ducoro 的 Magpie 资源库资源分配给它，按需设置各 Bot 的单独分配。
+3. 点击「预览变化」核对新增与撤销，再点击「保存设置」查看预览并确认。保存会重载插件宿主并开始同步。
+4. 打开「同步诊断」，检查保存、写入、读回与会话加载的结果；处理待核实项。CLI 命令成功不代表运行中的 Bot 已加载变化。
+
+只读检查 Ducoro 后台服务可执行：
+
+```sh
+npm exec --package=magpie-ducoro@0.4.10 -- magpie-ducoro-status --doctor
+```
+
+升级：停止旧版宿主，更新安装包或替换插件路径后再加载新版本，避免两个版本同时写入共享管理状态。已有设置和兼容的 v1/v2 管理记录自动沿用，无需重新配置。
+
+回退：先停止当前版本宿主，再在本包目录执行 `npm run state:compact -- /管理记录的绝对路径/state.json`，在共用锁内合并增量日志；异常中断后先由当前版本恢复记录再回退。不要手动删除尚未合并的日志。
 
 ## 功能总览
 
@@ -49,13 +84,6 @@
 - 恢复前校验失败不会新增暂停；进入状态写入阶段后失败则保持暂停，避免在结果未确认时继续自动同步。
 - 「清理本地记录」先预览数量与空间再确认：清理已完成操作历史（最多 500 条）、历史状态备份（保留最近 5 份未标记保留）与超过 7 天未使用的技能缓存，并合并增量记录；保留当前归属、权限恢复数据、未完成操作与使用中的技能。
 
-## 安装
-
-安装 npm 包 `magpie-ducoro`（`npm install magpie-ducoro@0.4.9`），在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro#v0.4.9`，或从 GitHub Release 下载自动生成的 Source code 并解压后添加文件夹的绝对路径。从侧边栏 **Ducoro** 打开页面。需要 Magpie 支持插件页面服务，且本机已安装 `ducoro-cli` 并启动 Ducoro 后台。
-
-升级：停止旧版宿主，替换插件路径或安装包后再加载新版本，避免两个版本同时写入共享管理状态。已有设置和兼容的 v1/v2 管理记录自动沿用，无需重新配置。
-
-回退：先停止 0.4.9 宿主，再在本目录执行 `npm run state:compact -- /管理记录的绝对路径/state.json`，在共用锁内合并增量日志；异常中断后先由 0.4.9 恢复记录再回退。不要手动删除尚未合并的日志。
 
 ## 页面与分配
 
