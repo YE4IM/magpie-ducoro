@@ -1,10 +1,14 @@
-# Ducoro 0.4.8
+# Magpie-Ducoro-Plugin
 
-Version 0.4.8 fixes missing connector revocations in previews, removes contradictory skill changes, and makes skill scanning cancellable and time-bounded. Preview, sync and verification share the same resource rules. English and Chinese follow Magpie's language setting while preserving unsaved drafts, focus and open dialogs. See the [release notes](RELEASE-NOTES.md).
+**English** | [简体中文](README.zh-CN.md)
+
+## Ducoro 0.4.8
+
+Version 0.4.8 fixes missing connector revocations in previews, removes contradictory skill changes, and makes skill scanning cancellable and time-bounded. Preview, sync and verification share the same resource rules. English and Chinese follow Magpie's language setting while preserving unsaved drafts, focus and open dialogs. See the [release notes](docs/RELEASE-NOTES.md).
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro, and manage per-Bot assignments from the plugin page. Changes go through previews with confirmation before saving; failures are recorded by category with per-item retry; verification distinguishes saved settings, written configuration, readback and session loading.
 
-Full history: [CHANGELOG.md](CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](RELEASE-NOTES.md).
+Full history: [CHANGELOG.md](docs/CHANGELOG.md) · Release notes: [RELEASE-NOTES.md](docs/RELEASE-NOTES.md).
 
 ## Features
 
@@ -115,6 +119,16 @@ npm run lock:inspect -- /absolute/path/to/ducoro-bridge TOKEN --all-hosts-stoppe
 
 Plan-related configuration keys: `botPlansCatalog`, `botPlans`, `botInstructions`, `pausedModels`, `modelGuards`. Gateway connections, complete skill packages, instruction blocks and explicit subagents use the existing sync modules; hooks and RTK are not synchronized. Technical keys keep their original names; the UI calls library tools “connectors”.
 
+
+## Source layout
+
+- `bridge.mjs`: plugin entry point.
+- `ducoro.agent.js`: Magpie agent definition.
+- `diagnostics-cli.mjs`: diagnostic command entry point.
+- `lib/`: internal synchronization, state, diagnostics and page service modules.
+- `ui/` and `assets/`: web page files and icons.
+- `scripts/`: maintenance commands.
+- `docs/`: changelog and release notes.
 
 ## License
 

@@ -1,22 +1,22 @@
-import {selected} from "./inventory-shapes.mjs"
-import {within} from './path-safety.mjs'
-import {validateLibrary} from './library-schema.mjs'
-import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown} from './skill-bundle.mjs'
-import {createOperationRetries} from './operation-retries.mjs'
-import {syncResources} from './sync-resources.mjs'
-import {commandFailure} from './operation-controls.mjs'
-import {mcpServerArgs} from './mcp-update.mjs'
-import { acquireSyncLock } from "./sync-lock.mjs"
-import { DEFAULTS } from "./defaults.mjs"
-export { DEFAULTS } from "./defaults.mjs"
-import {readOperationControls} from './operation-controls.mjs'
-import { defHash,readableMcpHash } from './resource-fingerprint.mjs'
-import { maintainLocalRecords } from "./local-records.mjs"
-import { createSkillArtifacts } from "./skill-artifacts.mjs"
-import { createOperationStore } from "./operation-store.mjs"
-import { clearFileCache, fileMetrics } from "./file-cache.mjs"
-import * as Plans from "./plan-rules.mjs"
-import { createReadCoordinator, createProgress } from "./performance.mjs"
+import {selected} from "./lib/inventory-shapes.mjs"
+import {within} from './lib/path-safety.mjs'
+import {validateLibrary} from './lib/library-schema.mjs'
+import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown} from './lib/skill-bundle.mjs'
+import {createOperationRetries} from './lib/operation-retries.mjs'
+import {syncResources} from './lib/sync-resources.mjs'
+import {commandFailure} from './lib/operation-controls.mjs'
+import {mcpServerArgs} from './lib/mcp-update.mjs'
+import { acquireSyncLock } from "./lib/sync-lock.mjs"
+import { DEFAULTS } from "./lib/defaults.mjs"
+export { DEFAULTS } from "./lib/defaults.mjs"
+import {readOperationControls} from './lib/operation-controls.mjs'
+import { defHash,readableMcpHash } from './lib/resource-fingerprint.mjs'
+import { maintainLocalRecords } from "./lib/local-records.mjs"
+import { createSkillArtifacts } from "./lib/skill-artifacts.mjs"
+import { createOperationStore } from "./lib/operation-store.mjs"
+import { clearFileCache, fileMetrics } from "./lib/file-cache.mjs"
+import * as Plans from "./lib/plan-rules.mjs"
+import { createReadCoordinator, createProgress } from "./lib/performance.mjs"
 // Ducoro connector bridge — the Bun main module of magpie-ducoro.
 //
 // Runs inside magpie's plugin host. Watches the three artifacts the Ducoro
@@ -42,12 +42,12 @@ import { createReadCoordinator, createProgress } from "./performance.mjs"
 //
 // This file must export exactly one plugin function (plus _internal helpers).
 
-import { createPageService } from "./page-service.mjs"
-import { readManagedState, saveManagedState } from "./state-store.mjs"
-import { sourceFingerprint, createFallbackPoll } from "./watch-fallback.mjs"
-import { syncAccountConnectors } from "./account-connectors.mjs"
-import { withCommandRecovery } from "./command-recovery.mjs"
-import { createCommandRunner } from "./command-runner.mjs"
+import { createPageService } from "./lib/page-service.mjs"
+import { readManagedState, saveManagedState } from "./lib/state-store.mjs"
+import { sourceFingerprint, createFallbackPoll } from "./lib/watch-fallback.mjs"
+import { syncAccountConnectors } from "./lib/account-connectors.mjs"
+import { withCommandRecovery } from "./lib/command-recovery.mjs"
+import { createCommandRunner } from "./lib/command-runner.mjs"
 import { watch as fsWatch } from "node:fs"
 import {
   chmod,
@@ -65,12 +65,12 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { createTotalSync } from "./total.mjs"
-import { createModelSync } from "./model-sync.mjs"
-import { resolveCapabilityMappings, createCapabilityCatalog } from "./model-capabilities.mjs"
-import { mcpCommand, needsResourceTargets, planResourceScopes, validateResourceOptions, findUnavailableAssignments } from "./resource-scopes.mjs"
-import { createDiagnostics, removeLegacyReports } from "./diagnostics.mjs"
-import { validateOptions } from "./options.mjs"
+import { createTotalSync } from "./lib/total.mjs"
+import { createModelSync } from "./lib/model-sync.mjs"
+import { resolveCapabilityMappings, createCapabilityCatalog } from "./lib/model-capabilities.mjs"
+import { mcpCommand, needsResourceTargets, planResourceScopes, validateResourceOptions, findUnavailableAssignments } from "./lib/resource-scopes.mjs"
+import { createDiagnostics, removeLegacyReports } from "./lib/diagnostics.mjs"
+import { validateOptions } from "./lib/options.mjs"
 
 const HOME = homedir()
 
@@ -87,7 +87,7 @@ const DEFAULT_PATHS = {
 
 // ---------------------------------------------------------------- helpers
 
-import {sha256, slugify, mapServer, desiredResources} from "./resource-plan.mjs"
+import {sha256, slugify, mapServer, desiredResources} from "./lib/resource-plan.mjs"
 const str = (v) => (typeof v === "string" ? v.trim() : "")
 
 const normalizeModel = (model) => {
