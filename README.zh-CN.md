@@ -1,8 +1,6 @@
-# Magpie-Ducoro-Plugin
-
 [English](README.md) | **简体中文**
 
-## Ducoro 0.4.8
+# Ducoro 0.4.8
 
 0.4.8 修复撤销预览、技能重复变化和扫描取消问题，统一资源规则，并完成新增提示及发布文档的英文国际化。完整升级说明见 [版本说明](docs/RELEASE-NOTES.md)。
 
