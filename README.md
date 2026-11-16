@@ -1,3 +1,5 @@
+# Magpie-Ducoro-Plugin
+
 **English** | [简体中文](README.zh-CN.md)
 
 # Ducoro 0.4.8
