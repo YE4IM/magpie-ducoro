@@ -10,7 +10,7 @@ const translator = language => (strings, ...values) => {
   const key = strings.reduce((out, part, i) => out + part + (i < values.length ? `{${i}}` : ''), '');
   return globalThis.DucoroI18n.format(key, values, language);
 }
-import { readDiagnostics, defaultStateDir } from './diagnostics.mjs'
+import { readDiagnostics, defaultStateDir } from './lib/diagnostics.mjs'
 
 export function formatDiagnostics(report, language = 'en') {
   const t = translator(language);

@@ -297,4 +297,4 @@ Version 0.3.1 adds automatic model sync and official capability mapping for mode
 限制：自动匹配以 Ducoro 当前目录和可读取的组成员为依据；无法确认的版本不会降级
 匹配。混合组的共同能力仅作诊断，不能通过现有参考接口写成任意自定义能力配置。
 
-详情见 [README](README.md)。
+详情见 [README](../README.md)。

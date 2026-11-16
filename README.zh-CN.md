@@ -1,13 +1,15 @@
+[English](README.md) | **简体中文**
+
 # Ducoro 0.4.8
 
-0.4.8 修复撤销预览、技能重复变化和扫描取消问题，统一资源规则，并完成新增提示及发布文档的英文国际化。完整升级说明见 [版本说明](RELEASE-NOTES.md)。
+0.4.8 修复撤销预览、技能重复变化和扫描取消问题，统一资源规则，并完成新增提示及发布文档的英文国际化。完整升级说明见 [版本说明](docs/RELEASE-NOTES.md)。
 
 
-已完成中英文国际化，跟随 Magpie 语言切换，保留草稿、焦点和打开的弹窗。包含分组设置、Bot 边界及展开编辑对齐。详见 [版本升级介绍](RELEASE-NOTES.md)。
+已完成中英文国际化，跟随 Magpie 语言切换，保留草稿、焦点和打开的弹窗。包含分组设置、Bot 边界及展开编辑对齐。详见 [版本升级介绍](docs/RELEASE-NOTES.md)。
 
 把 Magpie 的模型、连接器、技能、指令与显式选择的子代理同步到 Ducoro，并在插件页面内按 Bot 管理分配。同步带变更预览与保存前确认；失败按类别记录并支持按项重试；配置核验区分保存、写入、读回与会话加载四个阶段。
 
-完整版本历史见 [CHANGELOG.md](CHANGELOG.md)，本次升级说明见 [RELEASE-NOTES.md](RELEASE-NOTES.md)。
+完整版本历史见 [CHANGELOG.md](docs/CHANGELOG.md)，本次升级说明见 [RELEASE-NOTES.md](docs/RELEASE-NOTES.md)。
 
 ## 功能总览
 
@@ -118,6 +120,16 @@ npm run lock:inspect -- /absolute/path/to/ducoro-bridge TOKEN --all-hosts-stoppe
 
 方案相关配置键：`botPlansCatalog`、`botPlans`、`botInstructions`、`pausedModels`、`modelGuards`。网关连接、完整技能包、指令区块及显式子代理沿用现有同步模块；钩子和 RTK 不同步。技术配置键保持原名，界面统一使用「连接器」。
 
+
+## 源码目录
+
+- `bridge.mjs`：插件入口。
+- `ducoro.agent.js`：Magpie 代理定义。
+- `diagnostics-cli.mjs`：诊断命令入口。
+- `lib/`：同步、状态管理、诊断和页面服务等内部模块。
+- `ui/`、`assets/`：页面文件与图标。
+- `scripts/`：维护命令。
+- `docs/`：更新记录与版本说明。
 
 ## 许可证
 
