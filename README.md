@@ -55,6 +55,29 @@ Upgrading: stop the previous host, then replace the plugin path or package befor
 
 Downgrading: stop the 0.4.8 host first, then run `npm run state:compact -- /absolute/path/to/state.json` from this package directory to merge the journal under the shared lock. After an interrupted run, recover with 0.4.8 first. Do not manually delete an uncompacted journal.
 
+## Tested environment, platforms and known limitations
+
+The following environment was used to validate 0.4.8 on November 16, 2026. These are tested versions; minimum compatible versions have not yet been established.
+
+| Component | Tested environment / version |
+| --- | --- |
+| Operating system and architecture | macOS / Apple Silicon (arm64); the macOS version was not recorded |
+| Node.js | 26.13.1 |
+| Bun | 1.4.4 |
+| Ducoro CLI | 2026.1116.136 |
+| Magpie | Locally installed version with plugin page service support; the version number was not recorded |
+
+Platform validation: the installation and synchronization checks below passed on macOS arm64. Windows, Linux and Intel macOS (x64) have not been tested on actual machines; compatibility remains unverified.
+
+Passed checks include repackaging and offline installation, first connection creation, updates and removal, ownership after restart, compatible v1/v2 management records, HTTP endpoints, and MCP / skill creation, updates, readback verification and removal. An isolated Magpie host loaded the installed package successfully. English/Chinese switching, draft and focus preservation, and selected layouts were also verified in an isolated browser environment.
+
+Known limitations and coverage gaps:
+
+- A minimum-version compatibility matrix for Magpie, Ducoro CLI, Node.js and Bun has not been completed.
+- Full interaction and host-protocol validation of the page embedded in the native Magpie desktop app remains incomplete. Isolated browser results do not establish that the entire native desktop flow passes.
+- Model requests used a local mock service. Real upstream model requests and writes to production Bots were outside that validation run.
+- A few English count messages use fixed plural forms and may show a singular/plural mismatch. Saving and language switching are unaffected.
+
 ## Page and assignments
 
 - **Sync settings**: switches for the model connection, models, connectors, skills, instructions and subagents. Disconnect handling and the three resource scopes use switches: off means global sync, on means per-Bot assignment.
