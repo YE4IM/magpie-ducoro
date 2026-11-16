@@ -1,6 +1,7 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Ducoro 0.4.1
 
-[简体中文](README.zh-CN.md)
 
 A Magpie plugin that synchronizes model connections, connectors, skills, instructions and selected subagents with Ducoro.
 
