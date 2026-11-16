@@ -8,11 +8,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YE4IM/magpie-ducoro-plugin.git"
+    "url": "git+https://github.com/YE4IM/magpie-ducoro.git"
   },
-  "homepage": "https://github.com/YE4IM/magpie-ducoro-plugin#readme",
+  "homepage": "https://github.com/YE4IM/magpie-ducoro#readme",
   "bugs": {
-    "url": "https://github.com/YE4IM/magpie-ducoro-plugin/issues"
+    "url": "https://github.com/YE4IM/magpie-ducoro/issues"
   },
   "type": "module",
   "main": "./bridge.mjs",

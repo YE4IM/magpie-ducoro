@@ -54,7 +54,7 @@
 
 ## 安装
 
-在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro-plugin#v0.4.8`，或从 GitHub Release 下载自动生成的 Source code 并解压后添加文件夹的绝对路径。本地也可安装重新打包的 `magpie-ducoro-0.4.8.tgz`。从侧边栏 **Ducoro** 打开页面。需要 Magpie 支持插件页面服务，且本机已安装 `ducoro-cli` 并启动 Ducoro 后台。
+在 Magpie 插件页面添加 `github:YE4IM/magpie-ducoro#v0.4.8`，或从 GitHub Release 下载自动生成的 Source code 并解压后添加文件夹的绝对路径。本地也可安装重新打包的 `magpie-ducoro-0.4.8.tgz`。从侧边栏 **Ducoro** 打开页面。需要 Magpie 支持插件页面服务，且本机已安装 `ducoro-cli` 并启动 Ducoro 后台。
 
 升级：停止旧版宿主，替换插件路径或安装包后再加载新版本，避免两个版本同时写入共享管理状态。已有设置和兼容的 v1/v2 管理记录自动沿用，无需重新配置。
 

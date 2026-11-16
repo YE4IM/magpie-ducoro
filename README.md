@@ -51,7 +51,7 @@ Full history: [CHANGELOG.md](docs/CHANGELOG.md) · Release notes: [RELEASE-NOTES
 
 ## Installation
 
-Add `github:YE4IM/magpie-ducoro-plugin#v0.4.8` in Magpie's plugin settings, or download the GitHub Release's automatically generated Source code, extract it and add the folder's absolute path. You can also install the local `magpie-ducoro-0.4.8.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
+Add `github:YE4IM/magpie-ducoro#v0.4.8` in Magpie's plugin settings, or download the GitHub Release's automatically generated Source code, extract it and add the folder's absolute path. You can also install the local `magpie-ducoro-0.4.8.tgz` package. Open **Ducoro** in the sidebar. Magpie must support plugin page services, and `ducoro-cli` and the Ducoro daemon must be available locally.
 
 Upgrading: stop the previous host, then replace the plugin path or package before loading the new version, so two versions never write the same management state. Existing settings and compatible v1/v2 records carry forward without reconfiguration.
 
