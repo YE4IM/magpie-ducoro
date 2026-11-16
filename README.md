@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Ducoro 0.4.5
 
 Sync Magpie models, connectors, skills, instructions and explicitly selected subagents to Ducoro, and manage per-Bot assignments from the plugin page. Changes go through previews with confirmation before saving; failures are recorded by category with per-item retry; verification distinguishes saved settings, written configuration, readback and session loading.

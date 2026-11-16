@@ -123,15 +123,12 @@
     "command-recovery.mjs",
     "page-http.mjs",
     "draft-store.mjs",
-    "sync-resources.mjs",
-    "DEVELOPMENT-0.4.6.zh-CN.md"
+    "sync-resources.mjs"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs",
     "state:compact": "node scripts/compact-state.mjs",
-    "lock:inspect": "node scripts/recover-lock.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "test:ui:serve": "python3 tests/ui-server.py"
+    "lock:inspect": "node scripts/recover-lock.mjs"
   },
   "bin": {
     "magpie-ducoro-status": "./diagnostics-cli.mjs"
