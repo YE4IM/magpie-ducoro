@@ -1,6 +1,7 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # magpie-ducoro
 
-English | [简体中文](README.zh-CN.md)
 
 A [magpie](https://usemagpie.ai) plugin that connects [Ducoro](https://ducoro.com) to Magpie models and syncs assigned MCP servers, skills, instructions and explicitly selected subagents. Hooks and RTK are not supported.
 

@@ -1,6 +1,7 @@
+[English](README.md) | **简体中文**
+
 # magpie-ducoro
 
-[English](README.md) | 简体中文
 
 一个 [magpie](https://usemagpie.ai) 插件：让 [Ducoro](https://ducoro.com) 使用 Magpie 模型，同步勾选的 MCP 服务器、技能、指令与显式选择的子代理。暂不支持 Hooks 和 RTK。
 
