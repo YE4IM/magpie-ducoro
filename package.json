@@ -103,7 +103,7 @@
     "scripts/",
     "docs/",
     "README.md",
-    "README-zh-CN.md"
+    "README.zh-CN.md"
   ],
   "scripts": {
     "diagnostics": "node diagnostics-cli.mjs",

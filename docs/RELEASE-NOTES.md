@@ -1,49 +1,11 @@
-The bilingual installation guide now starts with plugin registration in Magpie and walks through the first sync, from previewing changes to checking the result.
+# Ducoro 0.4.10
 
-## Maintenance & Dependencies
+0.4.10 完善 npm 包 [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro) 的中英文说明：安装步骤提前，明确通过 Magpie 添加插件的命令、Ducoro CLI 与后台服务要求、首次预览保存和诊断流程，以及尚未验证的兼容性范围。同步行为和管理记录格式与 0.4.9 一致。
 
-- Clarify Magpie page-service support, the Ducoro background service and CLI requirements, and which compatibility checks were performed.
-- Explain how to check saved, written, read-back, and session-loaded results and run a read-only diagnostic.
-- Update the version shown on the plugin page and in diagnostic reports.
+Version 0.4.10 improves the bilingual documentation for the npm package [`magpie-ducoro`](https://www.npmjs.com/package/magpie-ducoro): installation comes first, with the Magpie plugin-add command, Ducoro CLI and background-service requirements, first-use preview/save and diagnostic steps, and compatibility verification limits. Synchronization behavior and management record formats are unchanged from 0.4.9.
 
-## Installation & Upgrade
+在 Magpie 的「插件 → 添加插件」中输入 `magpie-ducoro@0.4.10`，或运行 `magpie plugin add magpie-ducoro@0.4.10`。单独执行 `npm install` 不会将插件注册到 Magpie。升级沿用已有兼容设置与管理记录；请先停止旧版宿主。
 
-In Magpie, open **Plugins → Add a plugin** and enter `magpie-ducoro@0.4.10`, or use the Magpie CLI.
+Enter `magpie-ducoro@0.4.10` in Magpie's **Plugins → Add a plugin**, or run `magpie plugin add magpie-ducoro@0.4.10`. An `npm install` alone does not register the plugin with Magpie. Compatible settings and management records carry forward; stop the previous host before upgrading.
 
-```bash
-magpie plugin add magpie-ducoro@0.4.10
-```
-
-Magpie's CLI help confirms the registration command. Registration and first sync were unverified in the documentation check because they require a configured Magpie and Ducoro installation.
-
-Before upgrading, stop the previous plugin host, then update the package or replace the configured plugin path. The new version can use existing settings and compatible v1/v2 management records.
-
-## Full Changelog
-
-- [Full Changelog](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.9...v0.4.10)
-
----
-
-中英文安装指南从在 Magpie 中注册插件讲起，并说明首次同步时如何预览变更、保存和核验结果。
-
-## 维护与依赖更新
-
-- 明确 Magpie 页面服务、Ducoro 后台服务和 CLI 要求，并说明已验证的兼容性范围。
-- 说明如何检查已保存、已写入、已读回和会话加载状态，以及如何运行只读诊断。
-- 更新插件页面和诊断报告显示的版本号。
-
-## 安装与升级
-
-在 Magpie 中打开「插件 → 添加插件」，输入 `magpie-ducoro@0.4.10`，也可以使用 Magpie 命令行。
-
-```bash
-magpie plugin add magpie-ducoro@0.4.10
-```
-
-已在 Magpie 命令行帮助中确认注册命令。注册和首次同步需要已配置的 Magpie 与 Ducoro 环境，本次文档检查未验证这两项操作。
-
-升级前先停止旧版插件宿主，再更新包版本或替换配置中的插件路径。新版可继续使用现有设置和兼容的 v1/v2 管理记录。
-
-## 完整变更日志
-
-- [完整变更日志](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.9...v0.4.10)
+完整更新说明见 [CHANGELOG.md](CHANGELOG.md) · Full history: [CHANGELOG.md](CHANGELOG.md)
