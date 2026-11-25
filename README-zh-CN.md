@@ -10,6 +10,10 @@
 
 [快速开始](#快速开始)
 
+<img src="./assets/ducoro-plugin.png" alt="Ducoro 插件的同步设置页，显示网关连接、Bot 模型、连接器、技能和指令的同步开关" width="720">
+
+*Ducoro 的同步设置页，使用示例数据。*
+
 ## 概述
 
 让 Ducoro 跟随 Magpie 的默认模型，或为不同 Bot 单独配置。保存前可以预览变更，保存后可核对 Ducoro 的写入、读回和会话加载状态。
