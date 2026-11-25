@@ -6,11 +6,16 @@
   const policy=p=>p===null?t('未配备'):t`允许：${names(p.allow)}；拒绝：${names(p.deny)}`
   const actions={add:t('新增'),update:t('更新'),remove:t('撤销'),restore:t('恢复原权限'),keep:t('保持'),conflict:t('外部修改冲突'),unmanaged:t('由 Ducoro 管理')}
   const status={disconnected:t('Magpie 尚未连接，保持当前模型'),'source-unknown':t('Magpie 导出暂不可读，模型同步暂缓'),same:t('已一致'),change:t('等待同步'),unavailable:t('目标模型当前不可用'),unknown:t('写入能力尚未确认'),unmanaged:t('此 Bot 模型不在同步范围')}
-  const sourceLabel=source=>source?.type==='plan'?t`继承方案：${source.plan}`:source?.type==='override'?t('Bot 单项覆盖'):t('全局设置');
+  const sourceLabel=source=>source?.type==='plan'?(source.trial?t`试用方案：${source.plan}`:t`继承方案：${source.plan}`):source?.type==='override'?t('Bot 单项覆盖'):t('全局设置');
   function renderRow(row,onResolve) {
     const block=el('section',undefined,'preview-bot')
     block.append(el('h3',row.id==='global'?t('全局资源'):row.name),el('p',row.id,'muted'))
-    for(const [kind,source] of Object.entries(row.sources??{}))block.append(el('p',t`${DucoroI18n.featureLabel(kind==='model'?'models':kind)} · ${sourceLabel(source)}${source.additive?' · '+t('追加到全局指令'):''}`,'muted'));
+    for (const [kind, source] of Object.entries(row.sources ?? {})) {
+      const labels = [DucoroI18n.featureLabel(kind === 'model' ? 'models' : kind), sourceLabel(source)];
+      if (source.additive) labels.push(t('追加到全局指令'));
+      block.append(el('p', t(joinMessages(labels, ' · ')), 'muted'));
+    }
+    if (row.connection) block.append(el('p', t`新增网关连接 ${row.connection.slug} · 默认模型 ${row.connection.model || t('未配置')}`));
     if(row.model){
       const table=el('div',undefined,'comparison-grid')
       table.append(el('div',t`上次同步模型\n${row.model.applied??t('尚无记录')}`),el('div',t`Ducoro 当前模型\n${row.model.current||t('未配置')}`),el('div',t`Magpie 期望模型\n${row.model.desired||t('保持当前模型')}`))
@@ -20,7 +25,12 @@
       const name=t(({skills:t('技能'),instructions:t('指令'),subagents:t('子代理')})[item.kind]??t('资源库连接器'))
       const resourceName=item.nameMessage?t(item.nameMessage):item.name
       block.append(el('p',item.action==='effective'?t`${name} · 预计获得：${names(item.gained)}；预计失去插件提供的资源：${names(item.lost)}`:t`${name} · ${actions[item.action]??t('待核实')} · ${resourceName}`))
-      if(['add','remove','effective','update'].includes(item.action))block.append(el('p',t(item.action==='update'?t('变化原因：源内容或权限与上次同步记录不同。'):t('变化原因：同步开关、分配范围或继承设置改变了有效资源。')),'muted'));
+      if (item.reasonMessage) block.append(el('p', t(item.reasonMessage), 'muted'));
+      for (const loss of item.losses ?? []) {
+        if (!row.resources.some(change => change.kind === item.kind && change.name === loss.name && change.action === 'remove'))
+          block.append(el('p', t`${loss.name} · ${t(loss.reasonMessage)}`, 'muted'));
+      }
+      if (!item.reasonMessage && !item.losses?.length && ['add','remove','effective','update'].includes(item.action))block.append(el('p',t(item.action==='update'?t('变化原因：源内容或权限与上次同步记录不同。'):t('变化原因：同步开关、分配范围或继承设置改变了有效资源。')),'muted'));
       if(item.summaryMessage||item.summary)block.append(el('p',t(item.summaryMessage??item.summary),'muted'))
     }
     for(const item of row.accounts) {
@@ -36,28 +46,33 @@
       block.append(section)
     }
     if(row.accountsUnknown)block.append(el('p',t('账户工具当前权限读取失败，无法确认差异；现有权限会保留。'),'notice'))
-    if(!row.resources.length&&!row.accounts.length&&!row.model)block.append(el('p',t('没有分配范围变化。'),'muted'))
+    if(!row.resources.length&&!row.accounts.length&&!row.model&&!row.connection)block.append(el('p',t('没有分配范围变化。'),'muted'))
     return block
   }
-  async function show(options,{save=false,resume=false}={}) {
+  async function show(options,{save=false,resume=false,trial=null}={}) {
     const controller=new AbortController(),waiting=el('dialog',undefined,'preview-dialog'),cancelWait=el('button',t('取消等待'),'secondary');cancelWait.type='button';cancelWait.onclick=()=>{controller.abort();waiting.close();};waiting.addEventListener('cancel',()=>controller.abort());waiting.append(el('h2',t('正在计算差异')),el('p',t('正在读取当前配置并计算差异；最长约 45 秒。取消等待只中止读取。')),cancelWait);document.body.append(waiting);waiting.showModal();
     let data;try{data=await ducoroApi('preview',options,{signal:controller.signal});}catch(error){if(controller.signal.aborted)return false;throw error;}finally{waiting.close();waiting.remove();}
     globalThis.DucoroResources?.showComparison(data)
     return new Promise(resolve=>{
       const dialog=el('dialog',undefined,'preview-dialog');dialog.setAttribute('aria-labelledby','preview-title')
       const title=el('h2',save?t('保存前预览'):t('逐 Bot 变更预览'));title.id='preview-title'
-      dialog.append(title,el('p',t`读取时间：${dateTime(data.updatedAt)}。同步前会再次校验当前状态。`,'muted'))
+      dialog.append(title);
+      if (options.planTrial && !trial) {
+        const pilot = data.rows.find(row => row.id === options.planTrial.botId);
+        dialog.append(el('p', t`试用 Bot：${pilot?.name ?? options.planTrial.botId}。其他 Bot 继续继承正式方案。`, 'notice'));
+      }
+      dialog.append(el('p',t`读取时间：${dateTime(data.updatedAt)}。同步前会再次校验当前状态。`,'muted'))
       const body=el('div',undefined,'preview-body')
       for(const warning of data.warningMessages??data.warnings)body.append(el('p',t(warning),'notice'))
       if(data.blocked)body.append(el('p',t('请先恢复管理记录或数据来源，再重新预览。同步状态中可重新读取管理记录。'),'notice error'))
       const changed = row => definite(row);
       const conflicted = row => row.accountsUnknown || row.accounts.some(x => x.action === 'conflict');
-      const definite=row=>row.model?.status==='change'||row.resources.some(x=>['add','update','remove','restore'].includes(x.action)||(x.action==='effective'&&((x.gained?.length??0)+(x.lost?.length??0)>0)))||row.accounts.some(x=>['add','update','remove','restore'].includes(x.action));
+      const definite=row=>row.connection?.action==='add'||row.model?.status==='change'||row.resources.some(x=>['add','update','remove','restore'].includes(x.action)||(x.action==='effective'&&((x.gained?.length??0)+(x.lost?.length??0)>0)))||row.accounts.some(x=>['add','update','remove','restore'].includes(x.action));
       const unknown=row=>['unknown','unavailable','source-unknown','disconnected'].includes(row.model?.status)||row.accountsUnknown||row.accounts.some(x=>x.action==='conflict')||row.resources.some(x=>x.action==='unknown');
       const affected = data.rows.filter(row=>row.id!=='global'&&definite(row)).length;
       dialog.append(el('p',t`待核实 Bot：${data.rows.filter(row=>row.id!=='global'&&unknown(row)).length} · 全局资源变化：${data.rows.some(row=>row.id==='global'&&definite(row))?t('有'):t('无')}`));
       dialog.append(el('p',t`受影响 Bot：${affected}`));
-      const additions=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>x.action==='add').length,0);
+      const additions=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>x.action==='add').length+Number(row.connection?.action==='add'),0);
       const removals=data.rows.reduce((n,row)=>n+[...row.resources,...row.accounts].filter(x=>['remove','restore'].includes(x.action)).length,0);
       dialog.append(el('p',t`新增操作项：${additions} · 撤销操作项：${removals}`));
       if(['modelScope','mcpScope','skillsScope'].some(key=>options[key]==='agents'))dialog.append(el('p',t('按 Bot 分配会替换插件的全局分配，请检查所有受影响 Bot。'),'notice'));
@@ -80,7 +95,31 @@
       body.append(caps);dialog.append(body)
       const footer=el('footer',undefined,'button-group'),cancel=el('button',save?t('返回修改'):t('关闭'),'secondary');cancel.type='button';cancel.addEventListener('click',()=>dialog.close())
       footer.append(cancel)
-      if(save||resume){const confirm=el('button',resume?t('确认继续同步'):t('确认保存并同步'),'primary');confirm.type='button';confirm.disabled=!!data.blocked||(resume&&!data.resumeToken);confirm.addEventListener('click',async()=>{if(resume){confirm.disabled=true;try{await ducoroApi('resume-reviewed',{token:data.resumeToken});}catch(error){body.prepend(el('p',error.message,'notice error'));confirm.disabled=false;return;}}dialog.close('save');});footer.append(confirm)}
+      if(save||resume){const confirm=el('button',resume?t('确认继续同步'):t('确认保存并同步'),'primary');confirm.type='button';confirm.disabled=!!data.blocked||(resume&&!data.resumeToken);confirm.addEventListener('click',async()=>{if(resume){confirm.disabled=true;try{await ducoroApi('resume-reviewed',{token:data.resumeToken});}catch(error){body.prepend(el('p',t(error.localizedMessage ?? error.message),'notice error'));confirm.disabled=false;return;}}dialog.close('save');});footer.append(confirm)}
+      if (trial && !data.blocked) {
+        const candidates = data.rows.filter(row => trial.ids.includes(row.id) && (
+          trial.kinds.includes('model') && row.sources.model.type !== 'override' && options.modelScope === 'agents' && row.model?.status === 'change' ||
+          row.resources.some(item => trial.kinds.includes(item.kind) && row.sources[item.kind]?.type !== 'override' &&
+            (item.kind === 'instructions' || options[item.kind === 'mcp' ? 'mcpScope' : 'skillsScope'] === 'agents') &&
+            ['add', 'remove', 'update', 'effective'].includes(item.action))
+        ));
+        if (candidates.length) {
+          const picker = el('select');
+          DucoroI18n.setAttribute(picker, 'aria-label', t('选择试用 Bot'));
+          for (const row of candidates) {
+            const item = el('option', t`${row.name} · ${row.id}`);
+            item.value = row.id;
+            picker.append(item);
+          }
+          const review = el('button', t('先让一个 Bot 试用'), 'secondary');
+          review.type = 'button';
+          review.onclick = () => dialog.close('trial');
+          footer.append(picker, review);
+          dialog.addEventListener('close', () => {
+            if (dialog.returnValue === 'trial') resolve({ trialBot: picker.value });
+          }, { once: true });
+        }
+      }
       dialog.append(footer)
       dialog.addEventListener('close',()=>{const saved=dialog.returnValue==='save';dialog.remove();resolve(saved)},{once:true})
       document.body.append(dialog);dialog.showModal();cancel.focus()

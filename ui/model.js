@@ -59,6 +59,12 @@ function validateFields(value) {
 
 const stable = value => JSON.stringify(value, (_key, item) => isRecord(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
 
+function matchesDraftBase(savedBase, baseline) {
+  if (!isRecord(savedBase)) return false;
+  const normalized = optionsForDisplay(savedBase);
+  return EDITABLE_KEYS.every(key => stable(normalized[key]) === stable(baseline[key]));
+}
+
 // Merge only fields the user changed. A parallel editor may add options or
 // change other fields; neither should be overwritten by this page's save.
 function mergeEditedOptions(rawCurrent, baseline, edited, keys = EDITABLE_KEYS) {
@@ -68,6 +74,22 @@ function mergeEditedOptions(rawCurrent, baseline, edited, keys = EDITABLE_KEYS) 
     throw DucoroI18n.error(t('这些设置已在其他页面更新。请点击「重新读取」后再修改，避免覆盖新配置。'))
   }
   return { options: { ...rawCurrent, ...Object.fromEntries(changed.map(key => [key, edited[key]])) }, changed }
+}
+
+function trialOffer(raw, options, changed) {
+  if (raw.planTrial || !changed.every(key => key === 'botPlansCatalog')) return null;
+  const before = raw.botPlansCatalog ?? {};
+  const after = options.botPlansCatalog ?? {};
+  const plans = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter(id => stable(before[id]) !== stable(after[id]));
+  if (plans.length !== 1) return null;
+  const [planId] = plans;
+  if (!before[planId] || !after[planId]) return null;
+  const ids = Object.keys(raw.botPlans ?? {}).filter(id => raw.botPlans[id] === planId);
+  if (ids.length < 2) return null;
+  const kinds = ['model', 'mcp', 'skills', 'instructions']
+    .filter(kind => stable(before[planId][kind]) !== stable(after[planId][kind]));
+  return kinds.length ? { planId, ids, kinds, candidate: after[planId] } : null;
 }
 
 const FEATURE_NAMES = { connection: t('网关连接'), models: t('模型与能力'), mcp: t('连接器'), skills: t('技能'), instructions: t('指令'), subagents: t('子代理') }
@@ -93,7 +115,7 @@ function parseDiagnosticReport(raw) {
   }
 }
 
-globalThis.DucoroUI = Object.freeze({ SWITCHES, DEFAULT_OPTIONS, EDITABLE_KEYS, FEATURE_NAMES, STATUS_NAMES, splitList, optionsForDisplay, validateFields, mergeEditedOptions, parseDiagnosticReport })
+globalThis.DucoroUI = Object.freeze({ SWITCHES, DEFAULT_OPTIONS, EDITABLE_KEYS, FEATURE_NAMES, STATUS_NAMES, splitList, optionsForDisplay, validateFields, matchesDraftBase, mergeEditedOptions, trialOffer, parseDiagnosticReport })
 })()
 
 }

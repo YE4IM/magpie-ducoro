@@ -24,11 +24,16 @@
     return {selected:raw.selected,dirty:raw.dirty,targets:raw.targets === null ? null : [...raw.targets],
       values:[...raw.values],modes,modelMode:raw.modelMode ?? (raw.values[1].trim() ? 'custom' : 'inherit')};
   }
+  function planFor(options, id) {
+    const key = options.botPlans?.[id];
+    const trial = options.planTrial;
+    return trial?.botId === id && trial.planId === key ? trial.candidate : options.botPlansCatalog?.[key];
+  }
   function resolve(options) {
     const out = structuredClone(options);
     out.botModels ??= {}; out.resourceAssignments ??= {}; out.botInstructions ??= {};
-    for (const [id, name] of Object.entries(options.botPlans ?? {})) {
-      const plan = options.botPlansCatalog?.[name]; if (!plan) throw Error('Unknown Bot configuration plan');
+    for (const id of Object.keys(options.botPlans ?? {})) {
+      const plan = planFor(options, id); if (!plan) throw Error('Unknown Bot configuration plan');
       if (plan.model && !Object.hasOwn(out.botModels,id)) out.botModels[id] = plan.model;
       const assignment = out.resourceAssignments[id] ??= {};
       for (const kind of ['mcp','skills']) if (plan[kind] !== undefined && !Object.hasOwn(assignment,kind)) assignment[kind] = [...plan[kind]];
@@ -43,8 +48,8 @@
     if(scope!=='agents' && kind!=='instructions')return global();
     const explicit=kind==='model'?Object.hasOwn(options.botModels??{},id):kind==='instructions'?Object.hasOwn(options.botInstructions??{},id):Object.hasOwn(options.resourceAssignments?.[id]??{},kind);
     if(explicit)return {type:'override',additive:kind==='instructions'};
-    const key=options.botPlans?.[id],plan=options.botPlansCatalog?.[key];
-    if(plan && (kind==='model'?!!plan.model:plan[kind]!==undefined))return {type:'plan',plan:String(plan.name??key).slice(0,120),additive:kind==='instructions'};
+    const key=options.botPlans?.[id],plan=planFor(options,id);
+    if(plan && (kind==='model'?!!plan.model:plan[kind]!==undefined))return {type:'plan',plan:String(plan.name??key).slice(0,120),trial:options.planTrial?.botId===id,additive:kind==='instructions'};
     return global();
   }
   function copyEffective(options,sourceId,targets,keys,inventory) {
@@ -73,5 +78,5 @@
     return next;
   }
 
-  globalThis.DucoroPlans = {resolve,source,copyEffective,clearOverrides,editorSnapshot};
+  globalThis.DucoroPlans = {resolve,source,planFor,copyEffective,clearOverrides,editorSnapshot};
 })();

@@ -7,7 +7,7 @@
     if(!options[kind==='mcp'?'syncMcp':'syncSkills'])return t`${title}：同步已关闭`;
     const scope=options[kind==='mcp'?'mcpScope':'skillsScope'];
     const explicit=scope==='agents'?options.resourceAssignments?.[bot.id]?.[kind]:undefined;
-    const plan=scope==='agents'?options.botPlansCatalog?.[options.botPlans?.[bot.id]]:undefined;
+    const plan=scope==='agents'?DucoroPlans.planFor(options, bot.id):undefined;
     const values=explicit??plan?.[kind];
     const mode=explicit!==undefined?t('指定'):plan?.[kind]!==undefined?t('方案'):t('继承');
     const capability=inventory?.capabilities?.[kind==='mcp'?'botMcp':'botSkills'];
@@ -21,7 +21,7 @@
     const count=account!==undefined?Object.keys(account).length:equipmentCount;
     const supported=['pi-agent','claude-code','codex'].includes(bot.runtime);
     const accountText=!supported?'':inventory?.capabilities?.accountPolicy==='unavailable'?t(' · 账户命令不可用'):count===undefined?t(' · 账户待查看'):t` · 账户 ${count} 项${account!==undefined?t('（草稿）'):''}`;
-    const unavailable=['mcp','skills'].some(kind=>{const scope=kind==='mcp'?'mcpScope':'skillsScope',library=inventory?.library?.[kind],plan=options.botPlansCatalog?.[options.botPlans?.[bot.id]],values=options.resourceAssignments?.[bot.id]?.[kind]??plan?.[kind];return bot.runtime==='pi-agent'&&options[kind==='mcp'?'syncMcp':'syncSkills']&&options[scope]==='agents'&&Array.isArray(library)&&values?.some(name=>!library.some(item=>item.name===name));});
+    const unavailable=['mcp','skills'].some(kind=>{const scope=kind==='mcp'?'mcpScope':'skillsScope',library=inventory?.library?.[kind],plan=DucoroPlans.planFor(options, bot.id),values=options.resourceAssignments?.[bot.id]?.[kind]??plan?.[kind];return bot.runtime==='pi-agent'&&options[kind==='mcp'?'syncMcp':'syncSkills']&&options[scope]==='agents'&&Array.isArray(library)&&values?.some(name=>!library.some(item=>item.name===name));});
     return {unavailable,connectors:t`${resource(options,inventory,bot,'mcp')}${accountText}`,skills:resource(options,inventory,bot,'skills')};
   }
   globalThis.DucoroBotSummary={project};
@@ -99,6 +99,7 @@ if (typeof document !== "undefined") {
     };
     function libraryField(bot, key, title, scopeKey) {
       const box = el("div", undefined, "resource-field");
+      box.dataset.setting = key;
       box.append(el("h3", title));
       const supported = bot.runtime === "pi-agent";
       if (!supported) {
@@ -206,6 +207,7 @@ if (typeof document !== "undefined") {
     }
     function modelField(bot) {
       const box = el("div", undefined, "resource-field");
+      box.dataset.setting = "model";
       box.append(
         el("h3", t("模型")),
 
@@ -247,13 +249,13 @@ if (typeof document !== "undefined") {
         else delete draft.botModels[bot.id];
         DucoroI18n.setText(
           expectedNote,
-          t`Magpie 期望：${expectedText(model.value || draft.botPlansCatalog?.[draft.botPlans?.[bot.id]]?.model || data.defaultModel)}`,
+          t`Magpie 期望：${expectedText(model.value || DucoroPlans.planFor(draft, bot.id)?.model || data.defaultModel)}`,
         );
         notify();
       });
       const expected =
         draft.modelScope === "agents"
-          ? (draft.botModels[bot.id] ?? draft.botPlansCatalog?.[draft.botPlans?.[bot.id]]?.model ?? data.defaultModel)
+          ? (draft.botModels[bot.id] ?? DucoroPlans.planFor(draft, bot.id)?.model ?? data.defaultModel)
           : data.defaultModel;
       const expectedNote = el(
         "p",
@@ -597,7 +599,7 @@ if (typeof document !== "undefined") {
 
     const fingerprint = (value) => JSON.stringify(value ?? null);
     function changedBot(id) {
-      return ["botModels", "resourceAssignments", "accountConnectors", "accountResolutions", "botPlans", "botInstructions", "modelGuards"].some(key => fingerprint(draft[key]?.[id]) !== fingerprint(baseline[key]?.[id])) || fingerprint(draft.botPlansCatalog?.[draft.botPlans?.[id]]) !== fingerprint(baseline.botPlansCatalog?.[baseline.botPlans?.[id]]) || (draft.pausedModels??[]).includes(id)!==(baseline.pausedModels??[]).includes(id);
+      return ["botModels", "resourceAssignments", "accountConnectors", "accountResolutions", "botPlans", "botInstructions", "modelGuards"].some(key => fingerprint(draft[key]?.[id]) !== fingerprint(baseline[key]?.[id])) || fingerprint(DucoroPlans.planFor(draft, id)) !== fingerprint(DucoroPlans.planFor(baseline, id)) || (draft.pausedModels??[]).includes(id)!==(baseline.pausedModels??[]).includes(id);
     }
     function applyFilters() {
       const query = $("bot-search").value.trim().toLowerCase(), filter = $("bot-filter").value;
@@ -687,7 +689,7 @@ if (typeof document !== "undefined") {
       const roster=new Set((data?.bots??[]).map(bot=>bot.id));
       for(const [id,cached] of botCards)if(!roster.has(id)){cached.node.remove();botCards.delete(id);}
       const comparisons=new Map((comparison?.rows??[]).map(row=>[row.id,row]));
-      const shared=JSON.stringify([data?.library,data?.models,data?.capabilities,data?.defaultModel,draft.targetAgents,draft.connectionSlug,draft.syncAgentModels,draft.syncConnection,draft.modelScope,draft.mcpScope,draft.skillsScope,draft.botPlansCatalog,draft.pausedModels,draft.syncMcp,draft.syncSkills,data?.gatewayStatus,document.documentElement.lang]);
+      const shared=JSON.stringify([data?.library,data?.models,data?.capabilities,data?.defaultModel,draft.targetAgents,draft.connectionSlug,draft.syncAgentModels,draft.syncConnection,draft.modelScope,draft.mcpScope,draft.skillsScope,draft.botPlansCatalog,draft.planTrial,draft.pausedModels,draft.syncMcp,draft.syncSkills,data?.gatewayStatus,document.documentElement.lang]);
       $("assignment-empty").hidden = !data?.bots || data.bots.length > 0;
       if (!data?.bots) return;
       let cursor=$('assignments').firstElementChild;
@@ -715,7 +717,9 @@ if (typeof document !== "undefined") {
         content.append(heading);
         const inherited = draft.botPlans?.[bot.id];
         if (inherited) {
-          content.append(el('p', t`继承方案：${draft.botPlansCatalog?.[inherited]?.name ?? inherited}`));
+          const plan = DucoroPlans.planFor(draft, bot.id);
+          const label = plan?.name ?? inherited;
+          content.append(el('p', draft.planTrial?.botId === bot.id ? t`试用方案：${label}` : t`继承方案：${label}`));
           const reset = el('button', t('清除单项覆盖，跟随方案'));
           reset.type = 'button'; reset.className = 'secondary';
           reset.onclick = () => { DucoroWorkspace.stage(DucoroPlans.clearOverrides(DucoroWorkspace.collect(),bot.id)); };
@@ -775,7 +779,29 @@ if (typeof document !== "undefined") {
       },
       updateSettings(options){const keys=['syncConnection','syncAgentModels','syncMcp','syncSkills','syncInstructions','syncSubagents','targetAgents','connectionSlug','modelScope','mcpScope','skillsScope'];if(keys.some(k=>JSON.stringify(options[k])!==JSON.stringify(draft[k]))){for(const k of keys)draft[k]=structuredClone(options[k]);invalidateComparison();render();}},
       setIssues(value) { issues = value; applyFilters(); },
-      focusBot(id,reason) { $("bot-search").value = id; $("bot-filter").value = "all"; applyFilters();const card=botCards.get(id)?.node;if(card){if(reason){let note=card.querySelector(".jump-reason");if(!note){note=el("p",undefined,"jump-reason notice");card.prepend(note);}DucoroI18n.setText(note,reason);}DucoroComponents.reveal(card.querySelector("h3"));} },
+      focusBot(id, reason, kind) {
+        $("bot-search").value = id;
+        $("bot-filter").value = "all";
+        applyFilters();
+        const card = botCards.get(id)?.node;
+        if (!card) return;
+        if (reason) {
+          let note = card.querySelector(".jump-reason");
+          if (!note) {
+            note = el("p", undefined, "jump-reason notice");
+            card.prepend(note);
+          }
+          DucoroI18n.setText(note, reason);
+        }
+        if (kind === 'instructions') {
+          DucoroPlanEditor?.focusBot(id);
+          return;
+        }
+        card.querySelector('.bot-editor').open = true;
+        const field = ['model', 'skills', 'mcp'].includes(kind) ? card.querySelector(`[data-setting="${kind}"] h3`) : null;
+        DucoroComponents.reveal(field ?? card.querySelector("h3"));
+        if (kind === 'accountConnectors') card.querySelector('.account-actions button')?.click();
+      },
       showComparison(value) {
         ++comparisonRequest;
         comparison = value;comparisonState="ready";comparisonTime=value.updatedAt;

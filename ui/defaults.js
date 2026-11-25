@@ -1,6 +1,6 @@
 // Shared editable defaults for browser, bridge and checkpoints.
 globalThis.DucoroDefaultOptions = Object.freeze( {
-  botPlansCatalog: {}, botPlans: {}, botInstructions: {}, pausedModels: [], modelGuards: {},
+  botPlansCatalog: {}, botPlans: {}, planTrial: null, botInstructions: {}, pausedModels: [], modelGuards: {},
   connectionSlug: 'magpie-ducoro', syncConnection: true, syncAgentModels: true,
   syncMcp: true, syncSkills: true, syncInstructions: true, syncSubagents: true,
   prune: true, onDisconnect: 'keep', targetAgents: [], subagentNames: [],

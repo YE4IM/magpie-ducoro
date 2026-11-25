@@ -11,8 +11,10 @@
       splitList,
       optionsForDisplay,
       validateFields,
+      matchesDraftBase,
       mergeEditedOptions,
       parseDiagnosticReport,
+      trialOffer,
     } = globalThis.DucoroUI;
 
     const $ = (id) => document.getElementById(id);
@@ -248,12 +250,13 @@
       for (const el of document.querySelectorAll(".tab-content"))
         el.hidden = el.id !== name;
       $("save-bar").hidden = name === "diagnostics";
+      document.dispatchEvent(new CustomEvent("ducoro-tab", { detail: name }));
       if (name === "diagnostics" && ready) void refreshReport();
       if (name === "resources" && ready) void DucoroResources.refresh();
     }
 
     function populate(options, preserveResourceBaseline = false) {
-      extensionDraft = Object.fromEntries(["botPlansCatalog","botPlans","botInstructions","pausedModels","modelGuards"].map(key=>[key,structuredClone(options[key] ?? DEFAULT_OPTIONS[key])]));
+      extensionDraft = Object.fromEntries(["botPlansCatalog","botPlans","planTrial","botInstructions","pausedModels","modelGuards"].map(key=>[key,structuredClone(options[key] ?? DEFAULT_OPTIONS[key])]));
       for (const [key] of SWITCHES) $(key).checked = options[key];
       if (!panel) {
         $("connectionSlug").value = options.connectionSlug;
@@ -340,12 +343,12 @@
     restoreButton.className=undoButton.className='secondary';
     if(!panel){const menu=node('details',undefined,'save-more'),summary=node('summary',t('更多')),items=node('div',undefined,'save-menu');menu.append(summary,items);items.append($('reload'),$('preview'),restoreButton,undoButton);$('save-bar').querySelector('.save-actions').prepend(menu);draftStatus.className='draft-status';}
     restoreButton.onclick=async()=>{try{clearTimeout(draftTimer);if(pendingDraft?.clear)await flushDraft();else pendingDraft=null;await draftWrite.catch(()=>{});const saved=await draftSession.read();if(!saved.options)return message(t('没有可恢复的本地草稿'));
-      if(JSON.stringify(saved.base)!==JSON.stringify(project(baseline)))return message(t('配置已变化，旧草稿未恢复'));
+      if(!matchesDraftBase(saved.base,baseline))return message(t('配置已变化，旧草稿未恢复'));
       DucoroWorkspace.stage({...collect(),...saved.options});globalThis.DucoroPlanEditor?.restore(saved.editor);}catch(error){message(t(error.localizedMessage??error.message),true);}};
     undoButton.onclick=()=>{if(undoDraft){const value=undoDraft;undoDraft=null;populate(optionsForDisplay(value),true);dirty();document.dispatchEvent(new Event('ducoro-workspace'));}};
     addEventListener('pagehide',()=>{persistDraft();void flushDraft();});
     document.addEventListener('ducoro-editor-change',()=>{dirty();persistDraft();});
-    globalThis.DucoroWorkspace = { collect, ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); undoDraft=collect(); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
+    globalThis.DucoroWorkspace = { collect, saved: () => structuredClone(baseline), ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); undoDraft=collect(); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
 
     function hasChanges() {
       if (!ready) return false;
@@ -439,19 +442,30 @@
         const edited = validateFields(collect());
         setBusy(true);
         const current = (await globalThis.magpie.options.get()) ?? {};
-        const { options, changed } = mergeEditedOptions(
+        const merged = mergeEditedOptions(
           current,
           baseline,
           edited,
           panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS,
         );
-        if (!changed.length) {
+        let { options } = merged;
+        if (!merged.changed.length) {
           message(t("没有需要保存的修改。"));
           return;
         }
         if (!panel) await ducoroApi("validate", options);
         if (!panel) {
-          if (!(await DucoroPreview.show(options, { save: true }))) return;
+          const trial = trialOffer(current, options, merged.changed);
+          const decision = await DucoroPreview.show(options, { save: true, trial });
+          if (!decision) return;
+          if (decision.trialBot) {
+            options = {
+              ...current,
+              planTrial: { planId: trial.planId, botId: decision.trialBot, candidate: trial.candidate },
+            };
+            await ducoroApi("validate", options);
+            if (!(await DucoroPreview.show(options, { save: true }))) return;
+          }
           const latest = (await globalThis.magpie.options.get()) ?? {};
           if (JSON.stringify(latest) !== JSON.stringify(current))
             throw DucoroI18n.error(
@@ -468,7 +482,11 @@
         baseline = optionsForDisplay(saved ?? options);
         populate(baseline);
         message(t("设置已保存，正在同步。稍后刷新报告可查看结果。"));
-        if (!panel) void followSync(savedAt, watch);
+        if (!panel) {
+          globalThis.DucoroPlanEditor?.reset();
+          document.dispatchEvent(new Event('ducoro-configuration-saved'));
+          void followSync(savedAt, watch);
+        }
       } catch (error) {
         const text=String(error.localizedMessage??error.message),sourceKey=error.localizedMessage?.key??text;const field=/连接标识/.test(sourceKey)?$("connectionSlug"):/目标 Bot/.test(sourceKey)?$("targetAgents"):/子代理名称/.test(sourceKey)?$("subagentNames"):/模型映射|模型 .*重复/.test(sourceKey)?$("references").querySelector("input"):null;if(field)DucoroComponents.fieldError(field,error.localizedMessage??text);
         message(
@@ -477,6 +495,7 @@
         );
       } finally {
         setBusy(false);
+        if (!panel) document.dispatchEvent(new Event("ducoro-workspace"));
       }
     }
 
@@ -554,7 +573,7 @@
       DucoroResources.setIssues(report.issues);
       DucoroI18n.setText($("diagnostic-summary"),t`最近同步：${report.lastSyncedAt?DucoroI18n.dateTime(report.lastSyncedAt):t("尚无记录")} · 需处理 ${report.issues.length} 项 · ${report.syncing?t("同步中"):t("本轮未运行")} · 读回核验见下方；会话加载待确认`);
       void globalThis.DucoroRestoreReview?.refresh();
-      document.dispatchEvent(new Event("ducoro-report"));
+      document.dispatchEvent(new CustomEvent("ducoro-report", { detail: report }));
       hasReport = true;
       $("report-empty").hidden = true;
       $("report-view").hidden = false;
@@ -748,6 +767,7 @@
       $("retry-sync").addEventListener("click", async () => {
         try {
           await ducoroApi("retry", {});
+          document.dispatchEvent(new Event("ducoro-operation-queued"));
           message(
             t("已请求重新同步，请稍后刷新报告。"),
             false,

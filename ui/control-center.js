@@ -57,14 +57,29 @@
     dialog.addEventListener('close',()=>{const accepted=dialog.returnValue==='discard';dialog.remove();resolve(accepted);},{once:true});document.body.append(dialog);dialog.showModal();cancel.focus();
   });
   choices.onchange=async()=>{const next=choices.value;choices.value=selected;if(editorDirty&&!await discardEditor())return;editorDirty=false;selected=next;targetDraft=null;const plan=DucoroWorkspace.collect().botPlansCatalog?.[selected]??{};name.input.value=plan.name??'';model.input.value=plan.model??'';mcp.input.value=plan.mcp?.join('\n')??'';skills.input.value=plan.skills?.join('\n')??'';instructions.input.value=plan.instructions??'';for(const [k,v]of Object.entries(modes))v.value=plan[k]===undefined?'inherit':plan[k].length?'custom':'none';modelMode.value=plan.model?'custom':'inherit';refreshPlans();document.dispatchEvent(new Event('ducoro-editor-change'));};
+  globalThis.DucoroPlanEditor.focusBot = async id => {
+    const plan = DucoroWorkspace.collect().botPlans?.[id];
+    if (!plan) {
+      DucoroComponents.reveal($('syncInstructions'));
+      return;
+    }
+    manager.open = true;
+    if (selected !== plan) {
+      choices.value = plan;
+      await choices.onchange();
+    }
+    DucoroComponents.reveal(instructions.wrap.querySelector('label'));
+  };
   const commit=async()=>{
     if(!editorDirty)return;
     if(!name.input.value.trim()){DucoroComponents.fieldError(name.input,t('请填写方案名称'));throw DucoroI18n.error(t('请填写方案名称'));}
     if(modelMode.value==='custom'&&!model.input.value.trim()){DucoroComponents.fieldError(model.input,t('请填写指定模型 ID'));throw Error(t('请填写指定模型 ID'));}
     const draft=DucoroWorkspace.collect(),id=selected||`plan-${crypto.randomUUID().slice(0,8)}`;
     const split=input=>[...new Set(input.value.split('\n').map(s=>s.trim()).filter(Boolean))];
+    if (draft.planTrial?.planId === id) throw DucoroI18n.error(t('请先推广或结束此方案的试用，再编辑方案。'));
     draft.botPlansCatalog??={};draft.botPlansCatalog[id]={name:name.input.value.trim(),...(modelMode.value==='custom'?{model:model.input.value.trim()}:{}),...Object.fromEntries(Object.entries(modes).filter(([,v])=>v.value!=='inherit').map(([k,v])=>[k,v.value==='none'?[]:split(k==='mcp'?mcp.input:skills.input)])),instructions:instructions.input.value};
     draft.botPlans??={};for(const check of targets.querySelectorAll('input'))if(check.checked)draft.botPlans[check.value]=id;else if(draft.botPlans[check.value]===id)delete draft.botPlans[check.value];
+    if (draft.planTrial && draft.botPlans[draft.planTrial.botId] !== draft.planTrial.planId) throw DucoroI18n.error(t('请先结束试用，再修改试用 Bot 的方案。'));
     if([...targets.querySelectorAll('input')].some(x=>x.checked)){
       const changed=['modelScope','mcpScope','skillsScope'].filter(k=>draft[k]!=='agents');
       if(changed.length&&!await confirmScopes(changed,draft))return false;
@@ -84,7 +99,7 @@
   let polling=false,nextPoll=0,pollDelay=1500,progressRead=null;
   const stepNames={'revoke-skills':t('撤销旧技能'),mcp:t('连接器'),skills:t('技能'),'instructions-subagents':t('指令与子代理'),accounts:t('账户权限'),models:t('模型')};
   async function progress(){if(polling||document.hidden)return;polling=true;try{const report=await ducoroApi('progress');live.querySelector('.poll-error')?.remove();const historyOpen=progressBox.querySelector('details')?.open;progressRead=new Date().toISOString();progressBox.replaceChildren();const row=report.current;pollDelay=row?.running?1500:10000;if(!row){progressBox.append(el('p',t('暂无同步记录')));return;}progressBox.append(el('p',row.running?t('正在同步'):t('本轮已结束')));for(const step of row.steps)progressBox.append(el('p',t`${stepNames[step.name]??step.name} · ${statusLabel(step.status)} · ${step.durationMs??0} ms`));if(row.metrics)progressBox.append(el('p',t`CLI：${row.metrics.calls} · 合并读取：${row.metrics.shared} · 文件读取：${row.metrics.reads??0} · 总耗时：${row.durationMs} ms`));const history=el('details');history.open=!!historyOpen;history.append(el('summary',t('最近同步记录')));for(const item of report.history??[])history.append(el('p',t`${DucoroI18n.dateTime(item.startedAt)} · ${item.durationMs} ms`));progressBox.append(history);}catch(error){let note=live.querySelector('.poll-error');if(!note){note=el('p');note.className='poll-error notice error';live.prepend(note);}setText(note,t`更新失败，最后读取于 ${progressRead?DucoroI18n.dateTime(progressRead):t('尚无记录')}：${error.message}；请刷新进度重试。`);}finally{polling=false;}}
-  live.append(actions(button(t('刷新进度'),progress),button(t('重试待处理部分'),async()=>{await ducoroApi('retry-failed',{});await progress();})));
+  live.append(actions(button(t('刷新进度'),progress),button(t('重试待处理部分'),async()=>{await ducoroApi('retry-failed',{});document.dispatchEvent(new Event('ducoro-operation-queued'));await progress();})));
   setInterval(()=>{if(!$('diagnostics').hidden&&!document.hidden&&Date.now()>=nextPoll){nextPoll=Date.now()+pollDelay;void progress();}},1500);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){nextPoll=0;if(!$('diagnostics').hidden)void progress();}});
   document.addEventListener('ducoro-saving',()=>{void progress();});

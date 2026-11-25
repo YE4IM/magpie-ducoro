@@ -1,7 +1,7 @@
 import {selected} from "./lib/inventory-shapes.mjs"
 import {within} from './lib/path-safety.mjs'
 import {validateLibrary} from './lib/library-schema.mjs'
-import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown} from './lib/skill-bundle.mjs'
+import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown, skillName} from './lib/skill-bundle.mjs'
 import {createOperationRetries} from './lib/operation-retries.mjs'
 import {syncResources} from './lib/sync-resources.mjs'
 import {commandFailure} from './lib/operation-controls.mjs'
@@ -113,17 +113,6 @@ const parseLibMcp = (json) => {
   if (!json || typeof json !== "object") return {}
   const servers = json.mcpServers
   return servers && typeof servers === "object" ? servers : {}
-}
-
-// claude-format server definition -> our internal shape (null when unmappable)
-// SKILL.md frontmatter name, falling back to the directory name
-const skillName = (md, fallback) => {
-  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(md))
-  if (fm) {
-    const m = /^name:\s*["']?([^"'\n]+?)["']?\s*$/m.exec(fm[1])
-    if (m && m[1].trim()) return m[1].trim()
-  }
-  return fallback
 }
 
 // Ducoro's dead-link validator treats every backticked dotted token as a

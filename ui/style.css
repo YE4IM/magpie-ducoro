@@ -141,3 +141,15 @@ html[lang=en].language-pending body::before{content:'Ducoro · Connecting to pag
 html[lang=en] .bot-summary{grid-template-columns:minmax(140px,1.2fr) minmax(120px,1fr) minmax(180px,1.3fr) minmax(130px,.9fr) auto}
 @media(max-width:1100px){html[lang=en] .bot-summary{grid-template-columns:minmax(140px,1.2fr) minmax(100px,1fr) auto;gap:8px 12px}html[lang=en] .bot-identity{grid-row:span 3}html[lang=en] .bot-current,html[lang=en] .bot-connectors,html[lang=en] .bot-skills{grid-column:2}html[lang=en] .bot-configure{grid-column:3;grid-row:1 / span 3}}
 @media(max-width:650px){html[lang=en] .bot-summary{grid-template-columns:minmax(0,1fr) auto}html[lang=en] .bot-identity{grid-column:1;grid-row:auto}html[lang=en] .bot-current,html[lang=en] .bot-connectors,html[lang=en] .bot-skills{grid-column:1}html[lang=en] .bot-configure{grid-column:2;grid-row:1 / span 4}.tabs{flex-wrap:wrap}}
+
+.bot-inspector > summary { cursor: pointer; font-weight: 650; }
+.inspector-controls { margin-block: .75rem; }
+.inspector-controls :is(select, input) { min-width: 0; max-width: 100%; }
+.bot-inspector ul { list-style: none; padding: 0; }
+.bot-inspector li { padding-block: .75rem; border-top: 1px solid var(--border, #8885); }
+.bot-inspector li p { margin-block: .25rem .5rem; }
+.comparison-grid.inspector-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.inspector-pair p { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 580px) {
+  .comparison-grid.inspector-pair { grid-template-columns: 1fr; }
+}

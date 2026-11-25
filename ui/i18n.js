@@ -1013,9 +1013,99 @@
   "技能来源在准备期间发生变化，请重试": "The skill source changed during preparation. Try again"
 })
 
+  Object.assign(ENGLISH, {
+    "试用方案「{0}」": "Trial plan \"{0}\"",
+    "继承方案「{0}」": "Inherits plan \"{0}\"",
+    "已核验一致": "Verified match",
+    "读回不一致": "Read-back differs",
+    "前往设置": "Open settings",
+    "按资源反查 Bot": "Find Bots by resource",
+    "资源类型": "Resource type",
+    "资源库资源": "Library resource",
+    "分配来源": "Assignment source",
+    "全部来源": "All sources",
+    "继承方案": "From a plan",
+    "按名称或 ID 筛选 Bot": "Filter Bots by name or ID",
+    "筛选 Bot": "Filter Bots",
+    "{0} · 读回：{1} · 会话加载：{2}": "{0} · Read-back: {1} · Session loading: {2}",
+    "资源定义待核实": "Resource definition unverified",
+    "最近核验 {0}": "Last verified: {0}",
+    "暂无本轮核验记录": "No recent verification",
+    "暂时无法确认分配范围，请刷新资源和同步设置。": "The assignment scope could not be determined. Refresh resource assignments and check sync settings.",
+    "该类型暂无可选资源。": "No resources of this type are available.",
+    "匹配 {0} 个 Bot · {1}": "Matching Bots: {0} · {1}",
+    "正在读回核验配置…": "Reading back and verifying configuration…",
+    "正在读取资源分配…": "Reading resource assignments…",
+    "刷新资源分配": "Refresh resource assignments",
+    "对比两个 Bot": "Compare two Bots",
+    "第一个 Bot": "First Bot",
+    "第二个 Bot": "Second Bot",
+    "{0} · {1} / {2} · 期望 {3} · {4} · 读回 {5} · 会话加载 {6}": "{0} · {1} / {2} · Expected model: {3} · {4} · Read-back: {5} · Session loading: {6}",
+    "模型路由": "Model route",
+    "无插件分配": "No assignment from this plugin",
+    "允许 {0} · 拒绝 {1}": "Allowed: {0} · Denied: {1}",
+    "账户工具 · {0}": "Account tools · {0}",
+    "追加指令配置不同": "Additional instructions differ",
+    "追加指令配置一致": "Additional instructions match",
+    "请选择两个不同的 Bot。": "Select two different Bots.",
+    "正在读取两台 Bot 的配置…": "Reading configuration for both Bots…",
+    "所选 Bot 已不在列表中，请刷新后重选。": "A selected Bot is no longer listed. Refresh and select again.",
+    "读取时间 {0} · {1}": "Read at {0} · {1}",
+    "资源分配暂不可核实。": "Resource assignments could not be verified.",
+    "至少一台 Bot 的账户工具权限读取失败。": "Account tool permissions could not be read for at least one Bot.",
+    "至少一台 Bot 选择的资源当前不可用。": "At least one Bot has an unavailable resource selected.",
+    "已读取的项目暂无差异。": "No differences in the available results.",
+    "本次读取未发现差异。": "No differences found.",
+    "选择完成后点击「比较」。": "Select both Bots, then choose Compare.",
+    "比较": "Compare",
+    "核验并比较": "Verify and compare",
+    "方案试用": "Plan trial",
+    "已保存 · 写入与读回：等待核验 · 会话加载：待核实": "Saved · Write and read-back: awaiting verification · Session loading: unconfirmed",
+    "试用方案「{0}」 · {1}": "Trial plan \"{0}\" · {1}",
+    "请先保存或撤销其他草稿，再处理试用方案。": "Save or discard other draft changes before updating this trial.",
+    "推广已加入草稿，请预览并保存。": "Rollout staged. Preview and save to apply it.",
+    "结束试用已加入草稿，请预览并保存。": "Ending the trial is staged. Preview and save to restore the original plan.",
+    "正在读取并核验试用配置…": "Reading and verifying the trial configuration…",
+    "配置已保存 · 核验时间 {0}": "Configuration saved · Verified at {0}",
+    "{0} {1}{2} · 写入：{3} · 读回：{4} · 会话加载：{5}": "{0} {1}{2} · Write: {3} · Read-back: {4} · Session loading: {5}",
+    "（撤销）": " (removal)",
+    "本次未取得试用 Bot 的写入或读回证据。": "No write or read-back evidence is available for the trial Bot.",
+    "请在 Ducoro 打开此 Bot 的新会话，确认本次试用的改动已加载。": "Start a new session with this Bot in Ducoro to confirm the trial changes have loaded.",
+    "核验试用 Bot": "Verify trial Bot",
+    "推广到其余 Bot": "Roll out to remaining Bots",
+    "结束试用并恢复原方案": "End trial and restore original plan",
+    "配置已保存，请刷新资源分配。": "Configuration saved. Refresh resource assignments.",
+    "配置已保存，请重新比较。": "Configuration saved. Compare again to see the latest changes.",
+    "请先推广或结束此方案的试用，再编辑方案。": "Roll out or end this plan's trial before editing it.",
+    "请先结束试用，再修改试用 Bot 的方案。": "End the trial before changing the trial Bot's plan.",
+    "试用方案：{0}": "Trial plan: {0}",
+    "新增网关连接 {0} · 默认模型 {1}": "New gateway connection: {0} · Default model: {1}",
+    "试用 Bot：{0}。其他 Bot 继续继承正式方案。": "Trial Bot: {0}. All other Bots continue to inherit the current plan.",
+    "选择试用 Bot": "Select a trial Bot",
+    "先让一个 Bot 试用": "Try with one Bot",
+    "暂时无法读取 Bot 列表，请刷新后重试。": "Could not read the Bot list. Refresh and try again.",
+    "继承方案 {0}": "Inherit plan {0}",
+    "Bot 自定义分配": "Custom Bot assignment",
+    "已关闭{0}同步。": "Sync is off for {0}.",
+    "已关闭资源库连接器同步。": "Library connector sync is off.",
+    "全局": "Global",
+    "按 Bot": "Per Bot",
+    "分配范围由「{0}」改为「{1}」，原范围将撤销此资源。": "The scope changed from \"{0}\" to \"{1}\". This resource will be removed from the previous scope.",
+    "此 Bot 当前不在同步目标范围，原分配将撤销。": "This Bot is outside the current sync targets. Its previous assignment will be removed.",
+    "分配由「{0}」改为「{1}」，因此撤销此资源。": "The assignment changed from \"{0}\" to \"{1}\", so this resource will be removed.",
+    "「{0}」的当前资源列表未包含此项。": "The current resource list for \"{0}\" excludes this item.",
+    "此资源已从 Magpie 资源库移除。": "This resource was removed from the Magpie library.",
+    "此资源在 Magpie 资源库已停用。": "This resource is disabled in the Magpie library.",
+    "资源库已取消将此资源分配给 Ducoro。": "The library no longer assigns this resource to Ducoro.",
+    "Magpie 导出的连接器已停用。": "The connector is disabled in Magpie's export.",
+    "此资源已不在当前有效分配中。": "This resource is no longer part of the effective assignment.",
+    "试用 Bot 已不在 Ducoro 列表中，请返回并重新选择。": "Ducoro no longer lists the trial Bot. Go back and select another Bot.",
+    "缺少确认已撤销所需的 Ducoro 资源列表或原资源标识。": "Verifying removal requires the Ducoro resource list and the original resource identifier.",
+  })
+
   const statusKeys = {completed:'已完成',running:'正在同步',pending:'等待处理',failed:'失败',same:'已一致',drift:'检测到配置偏移',paused:'已暂停',unknown:'待核实',verified:'已核验',skipped:'已跳过'}
   const featureKeys = {connection:'网关连接',models:'模型',mcp:'连接器',skills:'技能',instructions:'指令',subagents:'子代理',accountConnectors:'账户权限'}
-  const settingKeys = {botPlansCatalog:'Bot 配置方案',botPlans:'方案继承',botInstructions:'追加指令',pausedModels:'暂停模型管理',modelGuards:'模型变更保护',botModels:'Bot 模型分配',resourceAssignments:'资源分配',accountConnectors:'账户权限',accountResolutions:'账户冲突处理',modelScope:'模型作用域',mcpScope:'连接器作用域',skillsScope:'技能作用域',syncConnection:'网关连接',syncAgentModels:'Bot 模型跟随',syncMcp:'连接器',syncSkills:'技能',syncInstructions:'指令',syncSubagents:'子代理',subagentNames:'选择的子代理名称',targetAgents:'目标 Bot',modelCapabilityRefs:'模型能力参考',officialProviders:'官方供应商优先顺序',prune:'清理已取消分配的资源',onDisconnect:'断开连接后',connectionSlug:'连接标识'}
+  const settingKeys = {botPlansCatalog:'Bot 配置方案',botPlans:'方案继承',planTrial:'方案试用',botInstructions:'追加指令',pausedModels:'暂停模型管理',modelGuards:'模型变更保护',botModels:'Bot 模型分配',resourceAssignments:'资源分配',accountConnectors:'账户权限',accountResolutions:'账户冲突处理',modelScope:'模型作用域',mcpScope:'连接器作用域',skillsScope:'技能作用域',syncConnection:'网关连接',syncAgentModels:'Bot 模型跟随',syncMcp:'连接器',syncSkills:'技能',syncInstructions:'指令',syncSubagents:'子代理',subagentNames:'选择的子代理名称',targetAgents:'目标 Bot',modelCapabilityRefs:'模型能力参考',officialProviders:'官方供应商优先顺序',prune:'清理已取消分配的资源',onDisconnect:'断开连接后',connectionSlug:'连接标识'}
   const statusLabel = key => t(statusKeys[key] ?? '待核实')
   const featureLabel = key => featureKeys[key] ? t(featureKeys[key]) : key
   const settingLabel = key => settingKeys[key] ? t(settingKeys[key]) : key
@@ -1087,6 +1177,16 @@
       .replace(/(\b(?:aria-label|placeholder|title)=")([^"]+)(")/g, (match, before, text, after) =>
         Object.hasOwn(ENGLISH, text) ? before + escape(translate(text, language)) + after : match)
   }
+  function localizeVerificationRow(row, language) {
+    const localized = { ...row }
+    for (const field of ['message', 'missingEvidence', 'nextStep', 'permissionEvidence']) {
+      const source = row[field]
+      if (typeof source !== 'string') continue
+      localized[field] = translate(source, language)
+      localized[field + 'Message'] = message(source)
+    }
+    return localized
+  }
   function localizeReport(report, language = 'en') {
     const issue = value => ({...value, message: translate(value.message, language), nextAction: translate(value.nextAction, language)})
     return {...report, language: languageFor(language),
@@ -1123,5 +1223,5 @@
     doc.documentElement.classList.remove('language-pending')
     if(previous!==doc.documentElement.lang)doc.dispatchEvent(new Event('ducoro-language'))
   }
-  globalThis.DucoroI18n = Object.freeze({ statusLabel, featureLabel, settingLabel, languageFor, format, translate, message, joinMessages, dateTime, render, t, error:localizedError, setText, setAttribute, localizeHTML, localizeReport, applyDocument, messages: Object.freeze(ENGLISH) })
+  globalThis.DucoroI18n = Object.freeze({ statusLabel, featureLabel, settingLabel, languageFor, format, translate, message, joinMessages, dateTime, render, t, error:localizedError, setText, setAttribute, localizeHTML, localizeReport, localizeVerificationRow, applyDocument, messages: Object.freeze(ENGLISH) })
 })()

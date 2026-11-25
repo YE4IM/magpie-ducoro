@@ -13,11 +13,19 @@
         if(!partial.running)return;
         box.replaceChildren(el('p',t(partial.connectionError?t('核验连接暂时中断，正在重新连接…'):partial.background?t('仍在后台核验，将继续跟踪；已完成的条目如下。'):t('正在读取配置并核验…'))),...(partial.rows??[]).map(row=>el('p',t`${row.target} · ${DucoroI18n.statusLabel(row.status)}`)));
       }});
-      if(result.error) throw Error(result.error);
+      if(result.error) throw DucoroI18n.error(result.errorMessage ?? result.error);
       if(!result.running&&!result.updatedAt&&!result.completion&&!result.rows?.length){box.replaceChildren(el('p',t('尚未核验；请先完成一次同步，再读取核验。')));return;}
       box.replaceChildren(el("p", t`核验时间：${result.updatedAt ? DucoroI18n.dateTime(result.updatedAt) : t("尚无记录")} · ${t(result.completion==='partial'?t('部分完成，仍有待核实条目'):result.completion==='completed'?t('核验已完成'):t('核验结果待确认'))}`));
       box.append(el('p',t('已保存：以 Magpie 设置为准；已写入：以同步任务为准；已核验：以逐项读回为准；会话生效：待核实。')),el('p',t('请在 Ducoro 新建会话或开始下一轮对话，检查模型名称、可用工具、技能和子代理列表；指令请用一条可辨识规则验证。')));
-      for (const row of result.rows ?? []) { box.append(el("p", t`${row.target} · ${{connection:t("网关连接"),models:t("模型"),mcp:t("连接器"),skills:t("技能"),instructions:t("指令"),subagents:t("子代理"),accountConnectors:t("账户权限")}[row.feature] ?? row.feature} · ${{verified:t("已写入并核验"),failed:t("核验失败"),unknown:t("待核实"),skipped:t("已跳过")}[row.status] ?? t("待核实")}：${t(row.message ?? "")}${row.digest?' · '+row.digest:''}${row.missingEvidence?' · '+t(row.missingEvidence):''}${row.nextStep?' · '+t(row.nextStep):''}${row.permissionEvidence?' · '+t(row.permissionEvidence):''}`));
+      const states = { verified: '已写入并核验', failed: '核验失败', unknown: '待核实', skipped: '已跳过' };
+      for (const row of result.rows ?? []) {
+        const summary = t`${row.target} · ${DucoroI18n.featureLabel(row.feature)} · ${t(states[row.status] ?? '待核实')}：${t(row.messageMessage ?? row.message ?? '')}`;
+        const details = [summary];
+        if (row.digest) details.push(row.digest);
+        for (const field of ['missingEvidence', 'nextStep', 'permissionEvidence']) {
+          if (row[field]) details.push(t(row[field + 'Message'] ?? row[field]));
+        }
+        box.append(el('p', t(DucoroI18n.joinMessages(details, ' · '))));
         box.append(el('p',t`保存：${t(row.stages?.saved==='confirmed'?t('已保存'):t('待核实'))} · 写入：${t(row.stages?.written==='confirmed'?t('已确认'):t('待核实'))} · 核验：${DucoroI18n.statusLabel(row.status)} · 会话生效：${t('待核实')}`));
       }
       if (!result.rows?.length) box.append(el("p",result.completion==='completed'?t('本次没有可核验对象；请检查同步开关和资源选择。'):t('暂无可核验条目，记录待确认。')));
