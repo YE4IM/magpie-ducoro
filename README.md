@@ -8,7 +8,7 @@
 
 A Magpie plugin that syncs models, connectors, skills, and instructions to Ducoro Bots.
 
-[![License: MIT](./assets/badges/license.svg)](./LICENSE) [![Version: 0.4.11](./assets/badges/version.svg)](./package.json) [![Language: JavaScript](./assets/badges/language.svg)](./lib/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2359D1?style=flat&labelColor=382A26)](./LICENSE) [![Version: 0.4.11](https://img.shields.io/badge/Version-0.4.11-FF895A?style=flat&labelColor=382A26)](./package.json) [![Language: JavaScript](https://img.shields.io/badge/Language-JavaScript-FFB3B8?style=flat&labelColor=382A26)](./lib/)
 
 [Go to Quick Start](#quick-start)
 
