@@ -6,9 +6,9 @@
 
 [English](./README.md) | [**中文**](./README-zh-CN.md)
 
-一个 Magpie 插件，用来把模型、连接器、技能和指令同步到 Ducoro Bot。
+通过 Magpie 插件，为 Ducoro Bot 配置并同步模型、连接器、技能和指令。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-2359D1?style=flat&labelColor=382A26)](./LICENSE) [![Version: 0.4.11](https://img.shields.io/badge/Version-0.4.11-FF895A?style=flat&labelColor=382A26)](./package.json) [![Language: JavaScript](https://img.shields.io/badge/Language-JavaScript-FFB3B8?style=flat&labelColor=382A26)](./lib/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2359D1?style=flat&labelColor=382A26)](./LICENSE) [![Version: 0.4.11](https://img.shields.io/badge/Version-0.4.11-A34422?style=flat&labelColor=382A26)](./package.json) [![Language: JavaScript](https://img.shields.io/badge/Language-JavaScript-993D58?style=flat&labelColor=382A26)](./lib/)
 
 [前往快速开始](#快速开始)
 
@@ -18,7 +18,7 @@
 
 ## 概述
 
-可以让多个 Bot 共用 Magpie 的默认模型，也可以为各个 Bot 单独选模型。同步前可预览 Ducoro 将收到哪些设置和资源，以及哪些分配会被撤销。
+多个 Bot 可以共用 Magpie 的默认模型，也支持逐个配置。同步前可预览改动，同步后可查看写入结果，以及哪些设置已通过读回核验。
 
 ## 环境要求
 
@@ -38,10 +38,10 @@ magpie plugin add github:YE4IM/magpie-ducoro#v0.4.11
 
 ## 快速开始
 
-1. 在 Magpie 的「Agent」页面连接 Ducoro 并选择模型，再从 Magpie 侧边栏打开「Ducoro」。
-2. 在「同步设置」中检查连接标识、启用的资源类型和目标 Bot。要单独分配资源，打开「Bot 资源」。
-3. 点击「预览变化」，核对新增项、撤销项以及是否会首次创建网关连接。如果修改了设置，点击「预览并保存」并确认，开始同步。
-4. 打开「同步状态」，核对写入结果和读回核验结果。沿用当前设置时，如需再运行一次同步，可在这里点击「重试同步」。要确认配置已在会话中生效，请在 Ducoro 中用目标 Bot 新建会话，并在会话中检查已同步的设置。
+1. 在 Magpie 的「Agent」页面连接 Ducoro 并选择模型，再从侧边栏打开「Ducoro」。
+2. 在「同步设置」中检查连接标识、启用的资源类型和目标 Bot。要为某个 Bot 单独分配资源，打开「Bot 资源」。
+3. 点击「预览变化」，核对新增项、撤销项以及同步时是否会创建网关连接。要应用修改，点击「预览并保存」并确认。
+4. 在「同步状态」中核对写入和读回结果。需要按已保存的设置再同步一次时，点击「重试同步」。要确认配置已加载，请在 Ducoro 中用目标 Bot 新建会话并检查相应设置。
 
 > [!NOTE]
 > 文档编写环境未完成插件安装和首次同步验证。只读诊断命令可以运行，但该环境无法连接插件的实时服务。
@@ -72,11 +72,13 @@ magpie plugin add github:YE4IM/magpie-ducoro#v0.4.11
 
 ## 故障排除
 
-如果插件页面打不开，请确认 Magpie 能找到 `ducoro-cli`、Ducoro 后台服务正在运行，且 `servicePort` 对应的端口可用。可在源码目录或解压后的发布目录运行以下只读诊断命令。加上 `--lang zh` 可显示中文，加上 `--json` 可输出结构化结果。
+如果插件页面打不开，请确认 Magpie 能找到 `ducoro-cli`、Ducoro 后台服务正在运行，且 `servicePort` 对应的端口可用。可在源码目录或解压后的发布目录运行以下只读诊断命令。
 
 ```bash
 node diagnostics-cli.mjs --doctor
 ```
+
+如果修改过 `servicePort`，请用 `--port` 指定端口。加上 `--lang zh` 可显示中文，加上 `--json` 可输出结构化结果。
 
 如果管理记录不可读导致同步暂停，请保留原始 `state.json` 及其增量日志。在「备份与恢复」中检查有效备份，恢复后先预览影响，再继续同步。
 
