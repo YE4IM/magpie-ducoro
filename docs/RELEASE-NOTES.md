@@ -1,4 +1,4 @@
-Trace resource assignments, compare two Bots, and try a shared plan on one Bot before rolling it out. Sync previews now show why resources will be removed and when the first gateway connection will be created.
+Find which Bots use a resource, compare two Bots, and verify a shared plan on one Bot before rolling it out.
 
 ## Added
 
@@ -23,13 +23,13 @@ Trace resource assignments, compare two Bots, and try a shared plan on one Bot b
 
 ## Installation & Upgrade
 
-Stop the previous plugin host before upgrading. Add the GitHub ref in Magpie or extract the source archive and register the extracted folder by absolute path. GitHub provides the ZIP and tar.gz source archives under Assets. [GitHub Release](https://github.com/YE4IM/magpie-ducoro/releases/tag/v0.4.11)
+Stop the current plugin host before upgrading. Enter the reference below in **Plugins → Add a plugin**, then open **Ducoro** in the Magpie sidebar. You can also extract this release’s source archive and register the folder by absolute path.
 
-```bash
-magpie plugin add github:YE4IM/magpie-ducoro#v0.4.11
+```text
+github:YE4IM/magpie-ducoro#v0.4.11
 ```
 
-Installation and end-to-end sync in a configured Magpie and Ducoro environment were unverified for this release.
+Plugin registration, upgrade, and end-to-end sync were unverified during this documentation update.
 
 ## Full Changelog
 
@@ -37,7 +37,7 @@ Installation and end-to-end sync in a configured Magpie and Ducoro environment w
 
 ---
 
-可反查资源分配、对比两个 Bot，并在推广共享方案前先让一个 Bot 试用。同步预览会说明资源撤销原因，并标出首次创建网关连接的操作。
+可按资源反查使用它的 Bot、对比两个 Bot，并在推广共享方案前先用一个 Bot 核验效果。
 
 ## 新增功能
 
@@ -45,7 +45,7 @@ Installation and end-to-end sync in a configured Magpie and Ducoro environment w
 - 对比两个 Bot 的模型路由、资源分配、账户工具权限和核验结果，并从差异项打开对应设置。
 - 让一个 Bot 试用共享方案。试用状态会跨自动同步和宿主重启保留，可核验后推广或恢复原方案。
 
-## 优化与改进
+## 行为变更
 
 - 分配、开关、资源库条目或导出文件变化时，预览会说明资源撤销原因，并标出首次创建网关连接的操作。
 - 任务中心在空闲时逐步降低轮询频率，切回页面或重试同步时立即刷新。
@@ -62,13 +62,13 @@ Installation and end-to-end sync in a configured Magpie and Ducoro environment w
 
 ## 安装与升级
 
-升级前先停止旧版插件宿主。在 Magpie 中添加 GitHub 引用，也可下载并解压源码，再通过文件夹绝对路径注册。GitHub 在 Assets 中提供 ZIP 和 tar.gz 源码归档。[GitHub Release](https://github.com/YE4IM/magpie-ducoro/releases/tag/v0.4.11)
+升级前停止当前插件宿主。在 Magpie 的「插件 → 添加插件」输入下列引用，然后打开侧边栏的「Ducoro」。也可下载本页的源码归档，解压后登记目录的绝对路径。
 
-```bash
-magpie plugin add github:YE4IM/magpie-ducoro#v0.4.11
+```text
+github:YE4IM/magpie-ducoro#v0.4.11
 ```
 
-本次发布未在已配置的 Magpie 和 Ducoro 环境中验证安装及端到端同步。
+本次文档整理期间未运行插件注册、升级和端到端同步。
 
 ## 完整变更日志
 

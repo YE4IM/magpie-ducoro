@@ -1,12 +1,10 @@
 # Changelog / 变更日志
 
-[Latest release notes / 最新发布说明](./RELEASE-NOTES.md)
+## [v0.4.11](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.10...v0.4.11) - 2026-11-25
 
-## [v0.4.11] - 2026-11-25
+Find which Bots use a resource, compare two Bots, and verify a shared plan on one Bot before rolling it out.
 
-Trace resource assignments, compare two Bots, and try a shared plan on one Bot before rolling it out. Sync previews now show why resources will be removed and when the first gateway connection will be created.
-
-可反查资源分配、对比两个 Bot，并在推广共享方案前先让一个 Bot 试用。同步预览会说明资源撤销原因，并标出首次创建网关连接的操作。
+可按资源反查使用它的 Bot、对比两个 Bot，并在推广共享方案前先用一个 Bot 核验效果。
 
 ### Added / 新增功能
 
@@ -22,7 +20,7 @@ Trace resource assignments, compare two Bots, and try a shared plan on one Bot b
 
   让一个 Bot 试用共享方案。试用状态会跨自动同步和宿主重启保留，可核验后推广或恢复原方案。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Show why a resource will be removed when assignments, switches, library entries, or export files change. Flag first-time gateway connection creation in the preview.
 
@@ -52,13 +50,13 @@ Trace resource assignments, compare two Bots, and try a shared plan on one Bot b
 
   插件页面和诊断统一读取包版本，打包前检查安装示例中的版本号。
 
-[Full Changelog / 完整变更日志](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.10...v0.4.11)
+[Release notes / 发布说明](./RELEASE-NOTES.md)
 
-## [v0.4.10] - 2026-11-17
+## [v0.4.10](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.9...v0.4.10) - 2026-11-17
 
-The bilingual installation guide walks through plugin registration in Magpie and verification of the first sync.
+The install guide now walks through plugin registration, preview, and verification of the first sync.
 
-中英文安装指南补充了 Magpie 插件注册和首次同步核验步骤。
+安装指南补充了插件注册、变更预览和首次同步核验步骤。
 
 ### Maintenance & Dependencies / 维护与依赖更新
 
@@ -70,11 +68,13 @@ The bilingual installation guide walks through plugin registration in Magpie and
 
   更新插件页面和诊断报告显示的版本号。
 
-## [v0.4.9] - 2026-11-16
+[Release notes / 发布说明](./releases/v0.4.10.md)
 
-This npm release fixes the command used to open the diagnostics report.
+## [v0.4.9](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.8...v0.4.9) - 2026-11-16
 
-此次 npm 发布修复了诊断报告命令的入口。
+The npm package corrects the entry point for the diagnostics command.
+
+npm 包修正了诊断命令的入口。
 
 ### Fixed / 问题修复
 
@@ -82,13 +82,15 @@ This npm release fixes the command used to open the diagnostics report.
 
   修正 npm 包的 `bin` 路径，使安装后可以调用 `magpie-ducoro-status`。
 
-## [v0.4.8] - 2026-11-16
+[Release notes / 发布说明](./releases/v0.4.9.md)
 
-First-time setup can create a missing Ducoro connection. Preview, sync, and verification now agree on which resources are assigned.
+## [v0.4.8](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.7...v0.4.8) - 2026-11-16
 
-首次设置时可创建缺失的 Ducoro 连接。预览、同步和核验使用一致的资源分配结果。
+First-time setup creates a missing gateway connection, and sync previews use the same resource selection rules as apply.
 
-### Changed / 优化与改进
+首次设置可创建缺失的网关连接，同步预览与实际写入使用一致的资源选择规则。
+
+### Changed / 行为变更
 
 - Apply the same resource selection rules in preview, sync, and verification.
 
@@ -114,13 +116,43 @@ First-time setup can create a missing Ducoro connection. Preview, sync, and veri
 
   以 `magpie-ducoro` 为包名将此版本发布到 npm。
 
-## [v0.4.7] - 2026-11-13
+[Release notes / 发布说明](./releases/v0.4.8.md)
 
-Grouped settings and expandable Bot resource editors make assignments easier to review. The interface follows Magpie's language and preserves drafts and focus during a language change.
+## [v0.4.4](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.3...v0.4.4) - 2026-11-16
 
-同步设置分组展示，Bot 资源可按需展开编辑。界面跟随 Magpie 语言，切换时保留草稿和焦点。
+Connector previews report actual changes, and previews use the same instruction and subagent targets as sync.
 
-### Changed / 优化与改进
+连接器预览会显示实际变更，指令和子代理的预览目标与同步目标一致。
+
+### Changed / 行为变更
+
+- Reuse inventory for the immediate automatic comparison. Manual and pre-save previews reread it. Run healthy full scans every five minutes while retaining faster polling in degraded mode.
+
+  即时自动对比复用本轮清单，手动预览和保存前预览重新读取。状态正常时每五分钟完整扫描一次，降级时保持快速轮询。
+
+- Validate recovery-operation timestamps, revision hashes, attempt counts, and dependencies before importing backups.
+
+  导入备份前校验恢复操作的时间、版本摘要、尝试次数和依赖字段。
+
+### Fixed / 问题修复
+
+- Preserve plan target selections across list refreshes and language changes.
+
+  刷新列表或切换语言后保留方案编辑中的目标 Bot 勾选。
+
+- Skip operation-log writes for verified, unchanged resources while retaining retries for missing or failed resources.
+
+  已核验且未变化的资源跳过操作日志写入，缺失或失败的资源仍可重试。
+
+[Release notes / 发布说明](./releases/v0.4.4.md)
+
+## [v0.4.7](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.6...v0.4.7) - 2026-11-13
+
+Grouped settings and expandable editors make it easier to review each Bot’s assigned resources.
+
+同步设置按类别分组，可展开编辑区查看各 Bot 的资源分配。
+
+### Changed / 行为变更
 
 - Group sync settings and align model, connector, and skill editors. Show the target range when reviewing a plan.
 
@@ -136,17 +168,15 @@ Grouped settings and expandable Bot resource editors make assignments easier to 
 
   修正保存栏状态文字的垂直对齐，并移除空草稿提示的占位。
 
-- The 2026-11-14 follow-up preserves plan draft modes, discards stale preview results, and recovers draft locks held by exited processes. It also preserves the existing sync state when a restore fails its preflight check.
+[Release notes / 发布说明](./releases/v0.4.7.md)
 
-  2026-11-14 的后续修复保留方案草稿的选择模式，丢弃过期预览结果，并恢复已退出进程遗留的草稿锁。恢复预检失败时也会保留原有同步状态。
+## [v0.4.6](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.5...v0.4.6) - 2026-11-13
 
-## [v0.4.6] - 2026-11-13
+Review plan edits before saving and review the impact of a management-record restore before resuming sync.
 
-Plan changes participate in the preview and save flow. Resuming synchronization after a management-record restore requires a separate review.
+保存前可预览方案编辑，恢复管理记录后需先核对影响再继续同步。
 
-方案修改纳入预览和保存流程。恢复管理记录后，需要单独预览影响并确认继续同步。
-
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Reorganize Bot resources and improve search, focus, and backup summaries.
 
@@ -162,11 +192,13 @@ Plan changes participate in the preview and save flow. Resuming synchronization 
 
   保存及检查未保存改动时纳入方案编辑，并修正预览失败提示、全局变化计数和首次核验状态。
 
-## [v0.4.5] - 2026-11-11
+[Release notes / 发布说明](./releases/v0.4.6.md)
 
-Previews show what was last synced, what Ducoro currently has, and what Magpie will apply. Drafts survive reloads, and interrupted writes are checked against actual state before recording plugin ownership.
+## [v0.4.5](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.4...v0.4.5) - 2026-11-11
 
-预览可对照上次同步、Ducoro 当前和 Magpie 期望配置。重新打开页面可以恢复草稿，写入中断后会先核对实际结果再记录托管归属。
+Compare current and desired settings, recover drafts after reloading, and verify interrupted writes before recording ownership.
+
+可对照当前和期望设置，重载后恢复草稿，并在确认托管归属前核对中断的写入。
 
 ### Added / 新增功能
 
@@ -182,7 +214,7 @@ Previews show what was last synced, what Ducoro currently has, and what Magpie w
 
   支持撤销最近一次批量分配。复制使用来源 Bot 的有效配置，包括继承值。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Show whether each previewed value comes from global settings, an inherited plan, or a Bot override, and list managed blocks and files scheduled for removal.
 
@@ -226,37 +258,13 @@ Previews show what was last synced, what Ducoro currently has, and what Magpie w
 
   CLI 无法安全清空连接器参数或切换传输方式时报告冲突，含逗号的连接器凭据通过引用保存。
 
-## [v0.4.4] - 2026-11-16
+[Release notes / 发布说明](./releases/v0.4.5.md)
 
-Connector previews avoid false updates, and instruction and subagent targets match those used by sync.
+## [v0.4.3](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.2...v0.4.3) - 2026-11-08
 
-连接器预览修正了误报，指令和子代理的预览目标与实际同步一致。
+Review backups, restore management records, and roll back selected configuration from one page.
 
-### Changed / 优化与改进
-
-- Reuse inventory for the immediate automatic comparison. Manual and pre-save previews reread it. Run healthy full scans every five minutes while retaining faster polling in degraded mode.
-
-  即时自动对比复用本轮清单，手动预览和保存前预览重新读取。状态正常时每五分钟完整扫描一次，降级时保持快速轮询。
-
-- Validate recovery-operation timestamps, revision hashes, attempt counts, and dependencies before importing backups.
-
-  导入备份前校验恢复操作的时间、版本摘要、尝试次数和依赖字段。
-
-### Fixed / 问题修复
-
-- Preserve plan target selections across list refreshes and language changes.
-
-  刷新列表或切换语言后保留方案编辑中的目标 Bot 勾选。
-
-- Skip operation-log writes for verified, unchanged resources while retaining retries for missing or failed resources.
-
-  已核验且未变化的资源跳过操作日志写入，缺失或失败的资源仍可重试。
-
-## [v0.4.3] - 2026-11-08
-
-Manage backups and configuration checkpoints in one place. Multi-Bot synchronization shares skill artifacts and repeated reads.
-
-集中管理备份和配置检查点。多 Bot 同步可复用技能产物并合并重复读取。
+可在同一页面查看备份、恢复管理记录并选择性回退配置。
 
 ### Added / 新增功能
 
@@ -264,7 +272,7 @@ Manage backups and configuration checkpoints in one place. Multi-Bot synchroniza
 
   导入外部备份、预览恢复、选择性回退配置，以及预览本地记录清理。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Save management changes in an incremental journal and reconcile interrupted operations against actual state before retrying.
 
@@ -284,11 +292,13 @@ Manage backups and configuration checkpoints in one place. Multi-Bot synchroniza
 
   增量同步时保留本轮范围以外资源的诊断结果和待处理项。
 
-## [v0.4.2] - 2026-11-07
+[Release notes / 发布说明](./releases/v0.4.3.md)
 
-Bots can continuously inherit shared plans and keep individual overrides. Incremental sync and item-level verification reduce repeated work and show the result of each change.
+## [v0.4.2](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.1...v0.4.2) - 2026-11-07
 
-多个 Bot 可以持续继承共享方案并保留单项覆盖。增量同步减少重复处理，逐项核验展示每项变更的结果。
+Share a plan across Bots, keep individual overrides, and check incremental sync results item by item.
+
+多个 Bot 可共享方案并保留单项覆盖，增量同步的结果可逐项核验。
 
 ### Added / 新增功能
 
@@ -300,7 +310,7 @@ Bots can continuously inherit shared plans and keep individual overrides. Increm
 
   新增 Bot 搜索、待保存计数、批量复制分配，以及备份预览和单份删除。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Reuse cached skill content, merge concurrent reads, and verify model changes concurrently.
 
@@ -320,13 +330,15 @@ Bots can continuously inherit shared plans and keep individual overrides. Increm
 
   报告首次写入失败导致的指令缺失，并将不可读的目标目录标为待核实。
 
-## [v0.4.1] - 2026-11-07
+[Release notes / 发布说明](./releases/v0.4.2.md)
 
-Settings become editable as they load, and multi-Bot previews handle slow or cancelled reads more reliably.
+## [v0.4.1](https://github.com/YE4IM/magpie-ducoro/compare/v0.4.0...v0.4.1) - 2026-11-07
 
-设置加载后即可编辑，多 Bot 预览改善了慢请求和取消请求的处理。
+Edit settings as they load and keep the previous diagnostics available while they refresh.
 
-### Changed / 优化与改进
+设置加载完成后即可编辑，刷新诊断时仍可查看上一次结果。
+
+### Changed / 行为变更
 
 - Load settings, resources, and catalogs independently. Limit concurrent permission reads and stop related reads when the preview is cancelled.
 
@@ -342,11 +354,13 @@ Settings become editable as they load, and multi-Bot previews handle slow or can
 
   防止过期响应覆盖草稿，并修复窄屏布局中的三列资源控件对齐。
 
-## [v0.4.0] - 2026-11-07
+[Release notes / 发布说明](./releases/v0.4.1.md)
 
-Preview changes by Bot and compare the desired Magpie settings with the current Ducoro configuration before saving.
+## [v0.4.0](https://github.com/YE4IM/magpie-ducoro/compare/v0.3.5...v0.4.0) - 2026-11-07
 
-保存前按 Bot 预览变更，对照 Magpie 期望和 Ducoro 当前配置。
+Before saving, preview the model, connector, skill, and account permission changes for each Bot.
+
+保存前可按 Bot 核对模型、连接器、技能和账户权限的变更。
 
 ### Added / 新增功能
 
@@ -358,7 +372,7 @@ Preview changes by Bot and compare the desired Magpie settings with the current 
 
   账户权限冲突可选择保留 Ducoro 策略或重新应用 Magpie 设置，写入前重新检查已核对的权限。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Check feature capabilities independently, prioritize account revocations, and preserve recovery records for uncertain writes.
 
@@ -378,13 +392,15 @@ Preview changes by Bot and compare the desired Magpie settings with the current 
 
   报告技能和模型同步状态时区分有效空导出、连接断开和导出不可读。
 
-## [v0.3.5] - 2026-11-06
+[Release notes / 发布说明](./releases/v0.4.0.md)
 
-A side drawer groups account connector settings, and the Ducoro model catalog can be refreshed and searched.
+## [v0.3.5](https://github.com/YE4IM/magpie-ducoro/compare/v0.3.4...v0.3.5) - 2026-11-06
 
-账户连接器改用侧边抽屉管理，Ducoro 模型目录支持刷新和搜索。
+Edit account connectors in a side drawer and search the Ducoro model catalog for capability references.
 
-### Changed / 优化与改进
+可在侧边抽屉编辑账户连接器，并搜索 Ducoro 模型目录来选择能力参考。
+
+### Changed / 行为变更
 
 - Edit assignment mode, account, and tool permissions together. Closing the drawer preserves the draft.
 
@@ -398,11 +414,27 @@ A side drawer groups account connector settings, and the Ducoro model catalog ca
 
   自动跟随 Magpie 语言，切换时保留草稿。诊断命令默认使用英文。
 
-## [v0.3.4] - 2026-11-06
+[Release notes / 发布说明](./releases/v0.3.5.md)
 
-A visual settings page brings together models, connectors, and skills. Diagnostics now come directly from the live service.
+## [v0.3.4](https://github.com/YE4IM/magpie-ducoro/compare/v0.3.2...v0.3.4) - 2026-11-06
 
-可视化设置页面集中管理模型、连接器和技能，诊断结果改为从实时服务获取。
+Assign resources from one settings page and check sync through live diagnostics.
+
+可在同一设置页分配资源，并通过实时诊断核对同步结果。
+
+### Breaking Changes / 破坏性变更
+
+Startup removes legacy diagnostic reports, and the settings page drops JSON snapshot imports.
+
+插件启动时会移除旧版诊断报告，设置页也移除了 JSON 快照导入。
+
+1. Use the Ducoro page’s diagnostics view for interactive checks.
+
+   在 Ducoro 页面打开诊断视图进行检查。
+
+2. For scripts, switch to the read-only diagnostics CLI, which reads from the running plugin service.
+
+   脚本改用只读诊断 CLI，从运行中的插件服务读取结果。
 
 ### Added / 新增功能
 
@@ -420,17 +452,13 @@ A visual settings page brings together models, connectors, and skills. Diagnosti
 
   插件重载后重新连接页面服务，并允许 Magpie 桌面端页面来源。
 
-### Deprecated & Removed / 弃用与移除
+[Release notes / 发布说明](./releases/v0.3.4.md)
 
-- Replace saved report files and snapshot import with on-demand diagnostics in the page and CLI.
+## [v0.3.2](https://github.com/YE4IM/magpie-ducoro/compare/v0.3.1...v0.3.2) - 2026-11-06
 
-  页面和命令行改为按需生成诊断，移除报告文件和快照导入入口。
+The new settings console lets you pick target Bots, map model capabilities, and assign resources per Bot.
 
-## [v0.3.2] - 2026-11-06
-
-A visual console exposes synchronization settings and per-Bot resource assignments.
-
-可视化控制台提供同步设置和按 Bot 分配资源的入口。
+新的设置台可选择目标 Bot、映射模型能力，并按 Bot 分配资源。
 
 ### Added / 新增功能
 
@@ -442,17 +470,19 @@ A visual console exposes synchronization settings and per-Bot resource assignmen
 
   使用只读诊断命令检查统一报告，或将报告快照导入控制台。
 
-### Changed / 优化与改进
+### Changed / 行为变更
 
 - Validate assignment scopes and resource lists before sync, and migrate older global management records when changing scope.
 
   同步前校验分配作用域和资源清单，切换作用域时迁移旧版全局管理记录。
 
-## [v0.3.1] - 2026-11-06
+[Release notes / 发布说明](./releases/v0.3.2.md)
 
-Magpie models and route groups can sync automatically, and Ducoro can use official catalog entries as capability references.
+## [v0.3.1](https://github.com/YE4IM/magpie-ducoro/compare/v0.3.0...v0.3.1) - 2026-11-06
 
-Magpie 模型和路由组支持自动同步，Ducoro 可使用官方目录条目作为能力参考。
+Associated Ducoro Bots follow Magpie’s default model and can use official catalog entries as capability references.
+
+关联的 Ducoro Bot 可跟随 Magpie 默认模型，并使用官方目录条目作为能力参考。
 
 ### Added / 新增功能
 
@@ -468,14 +498,18 @@ Magpie 模型和路由组支持自动同步，Ducoro 可使用官方目录条目
 
   监听路由组成员变化，支持失败重试及重启后恢复同步。
 
-## [v0.3.0] - 2026-11-05
+[Release notes / 发布说明](./releases/v0.3.1.md)
 
-The first tagged version adds Ducoro as a Magpie plugin agent and syncs assigned resources through `ducoro-cli`.
+## [v0.3.0](https://github.com/YE4IM/magpie-ducoro/releases/tag/v0.3.0) - 2026-11-05
 
-首个 Git 标签版本将 Ducoro 接入 Magpie 的插件 Agent，并通过 `ducoro-cli` 同步已分配的资源。
+The first release connects Ducoro to Magpie models and syncs selected resources through the local CLI.
+
+首个版本让 Ducoro 使用 Magpie 模型，并通过本地 CLI 同步选定的资源。
 
 ### Added / 新增功能
 
 - Connect Ducoro to Magpie models and synchronize assigned MCP connectors, skills, instructions, and explicitly selected subagents.
 
   让 Ducoro 使用 Magpie 模型，同步已分配的 MCP 连接器、技能、指令及显式选定的子代理。
+
+[Release notes / 发布说明](./releases/v0.3.0.md)
