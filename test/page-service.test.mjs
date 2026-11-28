@@ -269,3 +269,48 @@ test('page service serves core inventory, preview, checkpoint, operation, draft,
   const retryBlocked = await sendRequest(service.url, '/api/retry', { method: 'POST', headers: auth, body: {} });
   assert.equal(retryBlocked.status, 409);
 });
+
+test('page service sets localhost CSP, enforces backup action limits, handles missing restore-review, and serves all index.html scripts', async t => {
+  const { stateDir, service, token, host } = await setupService(t);
+  const port = new URL(service.url).port;
+  const localhostHost = `localhost:${port}`;
+  const auth = { 'X-Ducoro-Token': token, 'Content-Type': 'application/json' };
+
+  const localhostHtml = await sendRequest(service.url, '/index.html', {
+    headers: { Host: localhostHost },
+  });
+  assert.equal(localhostHtml.status, 200);
+  const csp = localhostHtml.headers['content-security-policy'];
+  assert.ok(csp.includes(`script-src 'self' http://${localhostHost}`), csp);
+  assert.ok(csp.includes(`connect-src 'self' http://${localhostHost}`), csp);
+  assert.ok(!csp.includes(`http://${host}`), csp);
+
+  const scriptMatches = [...localhostHtml.text.matchAll(/<script\s+src="([^"]+)"/g)].map(([, src]) => src);
+  assert.ok(scriptMatches.length > 0);
+  for (const src of scriptMatches) {
+    const asset = await sendRequest(service.url, `/${src}`);
+    assert.equal(asset.status, 200, `expected 200 for ${src}`);
+  }
+
+  await rm(join(stateDir, 'restore-review.json'), { force: true });
+  const missingReview = await sendRequest(service.url, '/api/resume-reviewed', {
+    method: 'POST',
+    headers: auth,
+    body: { token: 'x' },
+  });
+  assert.equal(missingReview.status, 409);
+
+  const oversizedCreate = await sendRequest(service.url, '/api/backup-files/state/create', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ pad: 'a'.repeat(70 * 1024) }),
+  });
+  assert.equal(oversizedCreate.status, 413);
+
+  const largeImportPreview = await sendRequest(service.url, '/api/backup-files/state/import-preview', {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({ content: JSON.stringify({ v: 2, mcp: {}, skills: {}, note: 'a'.repeat(70 * 1024) }) }),
+  });
+  assert.notEqual(largeImportPreview.status, 413);
+});

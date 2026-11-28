@@ -59,7 +59,7 @@ function validateFields(value) {
   return value
 }
 
-const stable = value => JSON.stringify(value, (_key, item) => isRecord(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
+const stable = value => JSON.stringify(value, (_key, item) => isRecord(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : item)
 
 function matchesDraftBase(savedBase, baseline) {
   if (!isRecord(savedBase)) return false;
@@ -117,7 +117,7 @@ function parseDiagnosticReport(raw) {
   }
 }
 
-globalThis.DucoroUI = Object.freeze({ SWITCHES, DEFAULT_OPTIONS, EDITABLE_KEYS, FEATURE_NAMES, STATUS_NAMES, splitList, optionsForDisplay, validateFields, matchesDraftBase, mergeEditedOptions, trialOffer, parseDiagnosticReport })
+globalThis.DucoroUI = Object.freeze({ SWITCHES, DEFAULT_OPTIONS, EDITABLE_KEYS, FEATURE_NAMES, STATUS_NAMES, splitList, optionsForDisplay, validateFields, matchesDraftBase, mergeEditedOptions, trialOffer, parseDiagnosticReport, stable })
 })()
 
 }

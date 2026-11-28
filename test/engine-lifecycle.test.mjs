@@ -376,3 +376,69 @@ test('reconcileCreations and syncMcp reuse per-round MCP list cache per scope', 
   assert.equal(listCalls.length, 1);
   assert.deepEqual(Object.keys((await f.snapshot()).mcp), ['global:magpie-alpha']);
 });
+
+test('legacy un-scoped state.skills migration persists on disk and drops old key', async t => {
+  const f = await setupFixture(t, { syncSkills: true });
+  const dir = join(f.paths.librarySkills, 'skill-one');
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'SKILL.md'), '---\nname: skill-one\n---\n# skill-one\n');
+  await writeFile(f.paths.library, JSON.stringify({
+    mcp: [],
+    skills: [{ name: 'skill-one', agents: ['ducoro'] }],
+    subagents: null,
+    instructions: null,
+  }));
+
+  const engine = f.create();
+  await engine.syncAll();
+  const initialHash = (await f.snapshot()).skills['global:skill-one'].hash;
+
+  // Rewrite state.json using the legacy un-scoped skill format.
+  await rm(f.stateFile + '.journal', { force: true });
+  await writeFile(f.stateFile, JSON.stringify({
+    v: 2,
+    connection: null,
+    mcp: {},
+    skills: { 'skill-one': { hash: initialHash, dir } },
+  }));
+
+  await engine.syncAll();
+  const diskCopy = join(f.stateDir, 'disk-check.json');
+  await copyFile(f.stateFile, diskCopy);
+  const journalPath = f.stateFile + '.journal';
+  await copyFile(journalPath, diskCopy + '.journal').catch(e => { if (e.code !== 'ENOENT') throw e; });
+  const persisted = (await readManagedState(diskCopy)).state;
+  const snapshot = await f.snapshot();
+  assert.equal(Object.hasOwn(persisted.skills, 'skill-one'), false);
+  assert.equal(Object.hasOwn(snapshot.skills, 'skill-one'), false);
+  assert.equal(persisted.skills['global:skill-one'].scope, 'global');
+});
+
+test('degraded watch fallback does not amplify timers across poll cycles', async t => {
+  if (process.getuid?.() === 0) return;
+  const { chmod } = await import('node:fs/promises');
+  const port = await freePort();
+  const f = await setupFixture(t, { servicePort: port, syncMcp: true });
+  await mkdir(f.paths.skills, { recursive: true });
+  await chmod(f.paths.skills, 0o000);
+  t.after(() => chmod(f.paths.skills, 0o700).catch(() => {}));
+
+  const originalSetTimeout = globalThis.setTimeout;
+  const fallbackDelays = [];
+  globalThis.setTimeout = (fn, delay, ...args) => {
+    if (fn?.name === 'checkFallback') fallbackDelays.push(delay);
+    return originalSetTimeout(fn, delay, ...args);
+  };
+  t.after(() => { globalThis.setTimeout = originalSetTimeout; });
+
+  const engine = f.create();
+  t.after(() => engine.stop());
+  await engine.start();
+  await new Promise(resolve => originalSetTimeout(resolve, 1250));
+  const reportWhileRunning = engine.getReport();
+  await engine.stop();
+
+  // Initial 1000ms timer plus at most one rescheduled 2000ms backoff timer (never exponential 2^N).
+  assert.ok(fallbackDelays.length >= 1 && fallbackDelays.length <= 3, `unexpected fallback timer count: ${fallbackDelays.length}`);
+  assert.equal(reportWhileRunning.issues.some(issue => issue.code === 'watch-error' || issue.code === 'watch-missing'), true);
+});

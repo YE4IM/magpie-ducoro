@@ -124,10 +124,17 @@
     }
   };
 
+  let lastAutoVerifiedKey = null;
   void DucoroRestoreReview.refresh();
   void verify(false);
   $("verify-results").onclick = () => verify(true);
-  document.addEventListener("ducoro-report", () => verify(true));
+  document.addEventListener("ducoro-report", (event) => {
+    const report = event.detail;
+    const key = report?.roundId ?? report?.lastSyncedAt ?? null;
+    if (!key || report?.syncing || key === lastAutoVerifiedKey) return;
+    lastAutoVerifiedKey = key;
+    void verify(true);
+  });
 
   const countSummary = (value) =>
     value

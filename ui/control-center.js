@@ -231,6 +231,8 @@
     }
   });
 
+  let targetPickerSignature = "";
+  let subagentPickerSignature = "";
   function refreshPlans() {
     if (!globalThis.DucoroWorkspace?.ready()) return;
     refreshMcp();
@@ -238,44 +240,56 @@
     modelChoices.replaceChildren();
 
     const targetPicker = $("target-picker");
-    targetPicker.replaceChildren();
-    for (const bot of DucoroResources.bots) {
-      const label = el("label");
-      const check = el("input");
-      label.className = "choice";
-      check.type = "checkbox";
-      check.checked = $("targetAgents").value.split("\n").includes(bot.id);
-      check.onchange = () => {
-        const values = new Set($("targetAgents").value.split("\n").filter(Boolean));
-        if (check.checked) values.add(bot.id);
-        else values.delete(bot.id);
-        $("targetAgents").value = [...values].join("\n");
-        $("targetAgents").dispatchEvent(new Event("input", { bubbles: true }));
-      };
-      label.append(check, el("span", `${bot.name} · ${bot.id}`));
-      targetPicker.append(label);
+    const bots = DucoroResources.bots ?? [];
+    const targetVal = $("targetAgents").value;
+    const nextTargetSig = JSON.stringify([bots.map((b) => [b.id, b.name]), targetVal]);
+    if (nextTargetSig !== targetPickerSignature) {
+      targetPickerSignature = nextTargetSig;
+      targetPicker.replaceChildren();
+      for (const bot of bots) {
+        const label = el("label");
+        const check = el("input");
+        label.className = "choice";
+        check.type = "checkbox";
+        check.checked = targetVal.split("\n").includes(bot.id);
+        check.onchange = () => {
+          const values = new Set($("targetAgents").value.split("\n").filter(Boolean));
+          if (check.checked) values.add(bot.id);
+          else values.delete(bot.id);
+          $("targetAgents").value = [...values].join("\n");
+          $("targetAgents").dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        label.append(check, el("span", `${bot.name} · ${bot.id}`));
+        targetPicker.append(label);
+      }
     }
 
     const roles = $("subagent-picker");
-    roles.replaceChildren();
-    for (const item of DucoroResources.inventory?.library?.subagents ?? []) {
-      const label = el("label");
-      const check = el("input");
-      label.className = "choice";
-      check.type = "checkbox";
-      check.checked = $("subagentNames").value.split("\n").includes(item.name);
-      check.onchange = () => {
-        const values = new Set($("subagentNames").value.split("\n").filter(Boolean));
-        if (check.checked) values.add(item.name);
-        else values.delete(item.name);
-        $("subagentNames").value = [...values].join("\n");
-        $("subagentNames").dispatchEvent(new Event("input", { bubbles: true }));
-      };
-      label.append(check, el("span", item.name));
-      roles.append(label);
-    }
-    if (!roles.children.length) {
-      roles.append(el("p", t("暂无可枚举子代理，可在上方按名称输入。")));
+    const subagents = DucoroResources.inventory?.library?.subagents ?? [];
+    const subagentVal = $("subagentNames").value;
+    const nextSubagentSig = JSON.stringify([subagents.map((x) => x.name), subagentVal]);
+    if (nextSubagentSig !== subagentPickerSignature) {
+      subagentPickerSignature = nextSubagentSig;
+      roles.replaceChildren();
+      for (const item of subagents) {
+        const label = el("label");
+        const check = el("input");
+        label.className = "choice";
+        check.type = "checkbox";
+        check.checked = subagentVal.split("\n").includes(item.name);
+        check.onchange = () => {
+          const values = new Set($("subagentNames").value.split("\n").filter(Boolean));
+          if (check.checked) values.add(item.name);
+          else values.delete(item.name);
+          $("subagentNames").value = [...values].join("\n");
+          $("subagentNames").dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        label.append(check, el("span", item.name));
+        roles.append(label);
+      }
+      if (!roles.children.length) {
+        roles.append(el("p", t("暂无可枚举子代理，可在上方按名称输入。")));
+      }
     }
 
     for (const item of DucoroResources.inventory?.models ?? []) {
@@ -331,10 +345,7 @@
       confirmLabel: t("确认"),
     });
 
-  choices.onchange = async () => {
-    const next = choices.value;
-    choices.value = selected;
-    if (editorDirty && !(await discardEditor())) return;
+  const loadSelectedPlan = (next) => {
     editorDirty = false;
     selected = next;
     targetDraft = null;
@@ -350,6 +361,13 @@
     modelMode.value = plan.model ? "custom" : "inherit";
     refreshPlans();
     document.dispatchEvent(new Event("ducoro-editor-change"));
+  };
+
+  choices.onchange = async () => {
+    const next = choices.value;
+    choices.value = selected;
+    if (editorDirty && !(await discardEditor())) return;
+    loadSelectedPlan(next);
   };
 
   globalThis.DucoroPlanEditor.focusBot = async (id) => {
@@ -374,7 +392,7 @@
     }
     if (modelMode.value === "custom" && !model.input.value.trim()) {
       DucoroComponents.fieldError(model.input, t("请填写指定模型 ID"));
-      throw Error(t("请填写指定模型 ID"));
+      throw DucoroI18n.error(t("请填写指定模型 ID"));
     }
     const draft = DucoroWorkspace.collect();
     const id = selected || `plan-${crypto.randomUUID().slice(0, 8)}`;
@@ -424,7 +442,7 @@
 
   Object.assign(globalThis.DucoroPlanEditor, {
     commit: async () => {
-      if ((await commit()) === false) throw Error(t("已取消方案应用；编辑已保留"));
+      if ((await commit()) === false) throw DucoroI18n.error(t("已取消方案应用；编辑已保留"));
     },
     reset() {
       editorDirty = false;
@@ -452,9 +470,11 @@
           throw DucoroI18n.error(t("请先取消所有 Bot 对此方案的继承"));
         }
         delete draft.botPlansCatalog[selected];
+        editorDirty = false;
         selected = "";
+        targetDraft = null;
         DucoroWorkspace.stage(draft);
-        choices.onchange();
+        loadSelectedPlan("");
       }),
     ),
   );
@@ -478,7 +498,7 @@
   const progressBox = el("div");
   live.append(progressBox);
   let polling = false;
-  let nextPoll = 0;
+  let pollTimer = null;
   let pollDelay = 1500;
   let progressRead = null;
   const stepNames = {
@@ -490,8 +510,18 @@
     models: t("模型"),
   };
 
+  const progressVisible = () => !document.hidden && !$("diagnostics").hidden;
+  const scheduleProgress = () => {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    if (!progressVisible()) return;
+    pollTimer = setTimeout(() => void progress(), pollDelay);
+  };
+
   async function progress() {
     if (polling || document.hidden) return;
+    clearTimeout(pollTimer);
+    pollTimer = null;
     polling = true;
     try {
       const report = await ducoroApi("progress");
@@ -537,6 +567,7 @@
       setText(note, t`更新失败，最后读取于 ${readAt}：${error.message}；请刷新进度重试。`);
     } finally {
       polling = false;
+      scheduleProgress();
     }
   }
 
@@ -550,18 +581,10 @@
       }),
     ),
   );
-  setInterval(() => {
-    if (!$("diagnostics").hidden && !document.hidden && Date.now() >= nextPoll) {
-      nextPoll = Date.now() + pollDelay;
-      void progress();
-    }
-  }, 1500);
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      nextPoll = 0;
-      if (!$("diagnostics").hidden) void progress();
-    }
-  });
+  const progressVisibilityChanged = () =>
+    progressVisible() ? void progress() : clearTimeout(pollTimer);
+  document.addEventListener("visibilitychange", progressVisibilityChanged);
+  document.addEventListener("ducoro-tab", progressVisibilityChanged);
   document.addEventListener("ducoro-saving", () => {
     void progress();
   });

@@ -167,6 +167,7 @@ const createEngine = (input = {}, options = {}) => {
   let watchFallback = null
   let wakeFallback = () => {}
   let watchDegraded = false
+  let checkingFallback = false
   let pageService = null
   let dirtySkillPaths = new Set()
   let roundSkillPaths = null
@@ -362,8 +363,9 @@ const createEngine = (input = {}, options = {}) => {
       }
     },
     onDegradedChange: (degraded) => {
+      const wasDegraded = watchDegraded
       watchDegraded = degraded
-      if (degraded) wakeFallback()
+      if (degraded && !wasDegraded && !checkingFallback) wakeFallback()
     },
     onWatchEvent: () => trigger("file-change"),
     diagnostics,
@@ -794,20 +796,27 @@ const createEngine = (input = {}, options = {}) => {
       await poll()
       if (!watching || generation !== lifecycleGeneration) return
       const checkFallback = async () => {
-        if (!watching || generation !== lifecycleGeneration) return
+        if (!watching || generation !== lifecycleGeneration || checkingFallback) return
+        clearTimeout(watchFallback)
+        watchFallback = null
+        checkingFallback = true
         let delay = 1000
         try {
           fallbackRequired = watchDegraded
           delay = await poll()
         } catch (e) {
           log("watch fallback scan deferred:", e?.message ?? e)
+        } finally {
+          checkingFallback = false
         }
         if (watching && generation === lifecycleGeneration) {
+          clearTimeout(watchFallback)
           watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 300000)
           watchFallback.unref?.()
         }
       }
       wakeFallback = () => {
+        if (!watching || generation !== lifecycleGeneration || checkingFallback) return
         clearTimeout(watchFallback)
         watchFallback = setTimeout(checkFallback, 0)
         watchFallback.unref?.()
@@ -846,6 +855,7 @@ const createEngine = (input = {}, options = {}) => {
     scheduler.reset()
     wakeFallback = () => {}
     watchDegraded = false
+    checkingFallback = false
     dirtyFeatures.clear()
     dirtySkillPaths.clear()
     roundFeatures = null

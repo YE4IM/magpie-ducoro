@@ -15,10 +15,10 @@
       mergeEditedOptions,
       parseDiagnosticReport,
       trialOffer,
+      stable,
     } = globalThis.DucoroUI;
 
     const $ = (id) => document.getElementById(id);
-    const panel = document.body.dataset.panel === "true";
     let baseline = null;
     let extensionDraft = {};
     let ready = false;
@@ -102,7 +102,6 @@
     }
 
     function updateEmptyRows() {
-      if (panel) return;
       const count = $("references").children.length;
       $("reference-empty").hidden = count > 0;
       DucoroI18n.setText($("manual-count"), t`${count} 项覆盖`);
@@ -236,7 +235,6 @@
     }
 
     function setTab(name) {
-      if (panel) return;
       for (const el of document.querySelectorAll("[data-tab]")) {
         const active = el.dataset.tab === name;
         el.classList.toggle("active", active);
@@ -253,24 +251,22 @@
     function populate(options, preserveResourceBaseline = false) {
       extensionDraft = Object.fromEntries(["botPlansCatalog","botPlans","planTrial","botInstructions","pausedModels","modelGuards"].map(key=>[key,structuredClone(options[key] ?? DEFAULT_OPTIONS[key])]));
       for (const [key] of SWITCHES) $(key).checked = options[key];
-      if (!panel) {
-        $("connectionSlug").value = options.connectionSlug;
-        $("onDisconnect").checked = options.onDisconnect === "remove";
-        $("subagentNames").value = options.subagentNames.join("\n");
-        $("targetAgents").value = options.targetAgents.join("\n");
-        $("officialProviders").value = options.officialProviders.join("\n");
-        for (const key of ["modelScope", "mcpScope", "skillsScope"]) {
-          $(key).checked = options[key] !== "global";
-          $(key).dataset.activeValue =
-            options[key] === "global" ? "agents" : options[key];
-        }
-        updateToggleLabels();
-        DucoroResources.set(options, preserveResourceBaseline);
-        $("references").replaceChildren();
-        for (const [route, ref] of Object.entries(options.modelCapabilityRefs))
-          addReference(route, ref);
-        updateEmptyRows();
+      $("connectionSlug").value = options.connectionSlug;
+      $("onDisconnect").checked = options.onDisconnect === "remove";
+      $("subagentNames").value = options.subagentNames.join("\n");
+      $("targetAgents").value = options.targetAgents.join("\n");
+      $("officialProviders").value = options.officialProviders.join("\n");
+      for (const key of ["modelScope", "mcpScope", "skillsScope"]) {
+        $(key).checked = options[key] !== "global";
+        $(key).dataset.activeValue =
+          options[key] === "global" ? "agents" : options[key];
       }
+      updateToggleLabels();
+      DucoroResources.set(options, preserveResourceBaseline);
+      $("references").replaceChildren();
+      for (const [route, ref] of Object.entries(options.modelCapabilityRefs))
+        addReference(route, ref);
+      updateEmptyRows();
       DucoroI18n.setText(
         $("connection-state"),
         t`连接：${options.connectionSlug} · 配置已读取`,
@@ -280,7 +276,6 @@
     function collect() {
       const options = structuredClone(baseline ?? DEFAULT_OPTIONS);
       for (const [key] of SWITCHES) options[key] = $(key).checked;
-      if (panel) return options;
       options.connectionSlug = $("connectionSlug").value.trim();
       options.onDisconnect = $("onDisconnect").checked ? "remove" : "keep";
       options.subagentNames = splitList($("subagentNames").value);
@@ -315,8 +310,8 @@
     let undoDraft = null;
     let draftWrite=Promise.resolve(),draftTimer,pendingDraft=null,draftTouched=false;
     const draftStatus=document.createElement('span');draftStatus.setAttribute('role','status');
-    if(!panel)$('save-bar').querySelector('.save-status').append(draftStatus);
-    const draftSession=panel?null:globalThis.DucoroDrafts.create({api:ducoroApi,onStatus:(status,error)=>DucoroI18n.setText(draftStatus,status==='error'?t(error.localizedMessage??error.message):t(status==='saving'?t('编辑草稿保存中'):t('编辑草稿已自动保存')))});
+    $('save-bar').querySelector('.save-status').append(draftStatus);
+    const draftSession=globalThis.DucoroDrafts.create({api:ducoroApi,onStatus:(status,error)=>DucoroI18n.setText(draftStatus,status==='error'?t(error.localizedMessage??error.message):t(status==='saving'?t('编辑草稿保存中'):t('编辑草稿已自动保存')))});
     const flushDraft=()=>{
       clearTimeout(draftTimer);
       if(!pendingDraft)return draftWrite;
@@ -329,7 +324,7 @@
     };
     const project = options => Object.fromEntries(EDITABLE_KEYS.map(key => [key, options[key]]));
     const persistDraft = (edited = null, collectError = null) => {
-      if(panel || !ready || busy)return;
+      if(!ready || busy)return;
       if(!hasChanges(edited, collectError)&&!globalThis.DucoroPlanEditor?.snapshot()?.dirty){if(!draftTouched)return;draftTouched=false;pendingDraft={clear:true};clearTimeout(draftTimer);draftTimer=setTimeout(()=>void flushDraft(),350);return;}
       draftTouched=true;
       try{
@@ -342,7 +337,7 @@
     const restoreButton = document.createElement('button');restoreButton.type='button';DucoroI18n.setText(restoreButton,t('恢复本地草稿'));
     const undoButton = document.createElement('button');undoButton.type='button';DucoroI18n.setText(undoButton,t('撤销最近批量修改'));
     restoreButton.className=undoButton.className='secondary';
-    if(!panel){const menu=node('details',undefined,'save-more'),summary=node('summary',t('更多')),items=node('div',undefined,'save-menu');menu.append(summary,items);items.append($('reload'),$('preview'),restoreButton,undoButton);$('save-bar').querySelector('.save-actions').prepend(menu);draftStatus.className='draft-status';}
+    {const menu=node('details',undefined,'save-more'),summary=node('summary',t('更多')),items=node('div',undefined,'save-menu');menu.append(summary,items);items.append($('reload'),$('preview'),restoreButton,undoButton);$('save-bar').querySelector('.save-actions').prepend(menu);draftStatus.className='draft-status';}
     restoreButton.onclick=async()=>{try{clearTimeout(draftTimer);if(pendingDraft?.clear)await flushDraft();else pendingDraft=null;await draftWrite.catch(()=>{});const saved=await draftSession.read();if(!saved.options)return message(t('没有可恢复的本地草稿'));
       if(!matchesDraftBase(saved.base,baseline))return message(t('配置已变化，旧草稿未恢复'));
       DucoroWorkspace.stage({...collect(),...saved.options});globalThis.DucoroPlanEditor?.restore(saved.editor);}catch(error){message(t(error.localizedMessage??error.message),true);}};
@@ -358,7 +353,7 @@
       let changed = true;
       try {
         const snapshot = edited ?? collect();
-        changed = (panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS).some(
+        changed = EDITABLE_KEYS.some(
           (key) =>
             JSON.stringify(snapshot[key]) !== JSON.stringify(baseline[key]),
         );
@@ -378,7 +373,7 @@
         collectError = error;
       }
       const changed = hasChanges(edited, collectError);
-      if(!panel && edited){try{DucoroResources.updateSettings(edited);}catch{}}
+      if (edited) { try { DucoroResources.updateSettings(edited); } catch {} }
       undoButton.disabled=!undoDraft;
       const editorDirty=globalThis.DucoroPlanEditor?.snapshot()?.dirty;
       const changeCount = edited
@@ -405,11 +400,9 @@
             row.querySelector(".ref-disabled").checked;
         for (const el of document.querySelectorAll('[data-locked="true"]'))
           el.disabled = true;
-        if (!panel) {
-          $("sync-catalog").disabled = catalogBusy;
-          $("refresh-bots").disabled = DucoroResources.refreshing;
-          $("refresh-report").disabled = reportBusy;
-        }
+        $("sync-catalog").disabled = catalogBusy;
+        $("refresh-bots").disabled = DucoroResources.refreshing;
+        $("refresh-report").disabled = reportBusy;
         dirty();
       }
     }
@@ -425,11 +418,9 @@
         message("");
         setBusy(false);
         document.dispatchEvent(new Event("ducoro-workspace"));
-        if (!panel) {
-          void DucoroResources.refresh();
-          void refreshCatalog();
-          if (!$("diagnostics").hidden) void refreshReport();
-        }
+        void DucoroResources.refresh();
+        void refreshCatalog();
+        if (!$("diagnostics").hidden) void refreshReport();
       } catch (error) {
         message(
           t`无法读取设置：${DucoroComponents.errorText(error)}`,
@@ -448,7 +439,7 @@
 
     async function save() {
       try {
-        if(!panel) await globalThis.DucoroPlanEditor?.commit();
+        await globalThis.DucoroPlanEditor?.commit();
         const edited = validateFields(collect());
         setBusy(true);
         const current = (await globalThis.magpie.options.get()) ?? {};
@@ -456,47 +447,43 @@
           current,
           baseline,
           edited,
-          panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS,
+          EDITABLE_KEYS,
         );
         let { options } = merged;
         if (!merged.changed.length) {
           message(t("没有需要保存的修改。"));
           return;
         }
-        if (!panel) await ducoroApi("validate", options);
-        if (!panel) {
-          const trial = trialOffer(current, options, merged.changed);
-          const decision = await DucoroPreview.show(options, { save: true, trial });
-          if (!decision) return;
-          if (decision.trialBot) {
-            options = {
-              ...current,
-              planTrial: { planId: trial.planId, botId: decision.trialBot, candidate: trial.candidate },
-            };
-            await ducoroApi("validate", options);
-            if (!(await DucoroPreview.show(options, { save: true }))) return;
-          }
-          const latest = (await globalThis.magpie.options.get()) ?? {};
-          if (JSON.stringify(latest) !== JSON.stringify(current))
-            throw DucoroI18n.error(
-              t("配置在预览期间已变化，请重新读取并再次预览。"),
-            );
+        await ducoroApi("validate", options);
+        const trial = trialOffer(current, options, merged.changed);
+        const decision = await DucoroPreview.show(options, { save: true, trial });
+        if (!decision) return;
+        if (decision.trialBot) {
+          options = {
+            ...current,
+            planTrial: { planId: trial.planId, botId: decision.trialBot, candidate: trial.candidate },
+          };
+          await ducoroApi("validate", options);
+          if (!(await DucoroPreview.show(options, { save: true }))) return;
         }
-        if (!panel) await ducoroApi("checkpoints", { before: current, after: options });
+        const latest = (await globalThis.magpie.options.get()) ?? {};
+        if (stable(latest) !== stable(current))
+          throw DucoroI18n.error(
+            t("配置在预览期间已变化，请重新读取并再次预览。"),
+          );
+        await ducoroApi("checkpoints", { before: current, after: options });
         document.dispatchEvent(new Event("ducoro-saving"));
         const savedAt = Date.now();
         const watch = ++syncWatch;
         const saved = await globalThis.magpie.options.set(options);
         await flushDraft().catch(()=>{});
-        if(!panel)await draftSession.clear().catch(error=>DucoroI18n.setText(draftStatus,t(error.localizedMessage??error.message)));
+        await draftSession.clear().catch(error=>DucoroI18n.setText(draftStatus,t(error.localizedMessage??error.message)));
         baseline = optionsForDisplay(saved ?? options);
         populate(baseline);
         message(t("设置已保存，正在同步。稍后刷新报告可查看结果。"));
-        if (!panel) {
-          globalThis.DucoroPlanEditor?.reset();
-          document.dispatchEvent(new Event('ducoro-configuration-saved'));
-          void followSync(savedAt, watch);
-        }
+        globalThis.DucoroPlanEditor?.reset();
+        document.dispatchEvent(new Event('ducoro-configuration-saved'));
+        void followSync(savedAt, watch);
       } catch (error) {
         const text = String(error.localizedMessage ?? error.message);
         const fieldMap = {
@@ -514,7 +501,7 @@
         );
       } finally {
         setBusy(false);
-        if (!panel) document.dispatchEvent(new Event("ducoro-workspace"));
+        document.dispatchEvent(new Event("ducoro-workspace"));
       }
     }
 
@@ -694,8 +681,14 @@
       }
     }
 
-    if (!panel) DucoroResources.getDraft = collect;
-    const onEdit=event=>{if(event.target.matches?.('input[type="search"],#bot-filter,#catalog-search')||event.target.closest?.('.resource-search'))return;dirty();};
+    DucoroResources.getDraft = collect;
+    const onEdit = (event) => {
+      if (
+        event.target.matches?.('input[type="search"],#bot-filter,#catalog-search') ||
+        event.target.closest?.('.resource-search,[data-local-controls="true"]')
+      ) return;
+      dirty();
+    };
     document.addEventListener("input", onEdit);
     document.addEventListener("change", onEdit);
     $("save").addEventListener("click", save);
@@ -707,76 +700,74 @@
     document.addEventListener("ducoro-controls", () => {
       if (!busy && ready) setBusy(false);
     });
-    if (!panel) {
-      for (const tab of document.querySelectorAll("[data-tab]"))
-        tab.addEventListener("click", () => setTab(tab.dataset.tab));
-      $("add-reference").addEventListener("click", () => {
-        addReference();
+    for (const tab of document.querySelectorAll("[data-tab]"))
+      tab.addEventListener("click", () => setTab(tab.dataset.tab));
+    $("add-reference").addEventListener("click", () => {
+      addReference();
+      dirty();
+    });
+    $("refresh-bots").addEventListener("click", () =>
+      DucoroResources.refresh(),
+    );
+    $("onDisconnect").addEventListener("change", updateToggleLabels);
+    for (const key of ["modelScope", "mcpScope", "skillsScope"])
+      $(key).addEventListener("change", () => {
+        $(key).dataset.activeValue = "agents";
+        updateToggleLabels();
+        DucoroResources.scopes({
+          [key]: $(key).checked ? "agents" : "global",
+        });
         dirty();
       });
-      $("refresh-bots").addEventListener("click", () =>
-        DucoroResources.refresh(),
-      );
-      $("onDisconnect").addEventListener("change", updateToggleLabels);
-      for (const key of ["modelScope", "mcpScope", "skillsScope"])
-        $(key).addEventListener("change", () => {
-          $(key).dataset.activeValue = "agents";
-          updateToggleLabels();
-          DucoroResources.scopes({
-            [key]: $(key).checked ? "agents" : "global",
-          });
-          dirty();
-        });
-      $("read-matches").onclick=()=>refreshCatalog(false);
-      $("sync-catalog").addEventListener("click", () => refreshCatalog(true));
-      $("catalog-search").addEventListener("input", renderCatalog);
-      $("preview").addEventListener("click", async () => {
-        try {
-          if(!panel) await globalThis.DucoroPlanEditor?.commit();
+    $("read-matches").onclick=()=>refreshCatalog(false);
+    $("sync-catalog").addEventListener("click", () => refreshCatalog(true));
+    $("catalog-search").addEventListener("input", renderCatalog);
+    $("preview").addEventListener("click", async () => {
+      try {
+        await globalThis.DucoroPlanEditor?.commit();
         const edited = validateFields(collect());
-          setBusy(true);
-          await DucoroPreview.show(edited);
-        } catch (error) {
-          message(DucoroComponents.errorText(error), true);
-        } finally {
-          setBusy(false);
-        }
-      });
-      $("retry-state").addEventListener("click", async () => {
-        try {
-          const state=await ducoroApi("state-status");
-          DucoroI18n.setText(
-            $("state-message"),
-            t(
-              state.pending ? t("记录已读取；恢复复核尚未完成，自动同步继续暂停。") : t("管理记录已只读检查；未请求同步。"),
-            ),
-          );
-        } catch (error) {
-          DucoroI18n.setText(
-            $("state-message"),
-            t(DucoroComponents.errorText(error)),
-          );
-        }
-      });
-      $("refresh-report").addEventListener("click", refreshReport);
-      $("retry-sync").addEventListener("click", async () => {
-        try {
-          await ducoroApi("retry", {});
-          document.dispatchEvent(new Event("ducoro-operation-queued"));
-          message(
-            t("已请求重新同步，请稍后刷新报告。"),
-            false,
-            "report-message",
-          );
-        } catch (error) {
-          message(
-            DucoroComponents.errorText(error),
-            true,
-            "report-message",
-          );
-        }
-      });
-    }
+        setBusy(true);
+        await DucoroPreview.show(edited);
+      } catch (error) {
+        message(DucoroComponents.errorText(error), true);
+      } finally {
+        setBusy(false);
+      }
+    });
+    $("retry-state").addEventListener("click", async () => {
+      try {
+        const state=await ducoroApi("state-status");
+        DucoroI18n.setText(
+          $("state-message"),
+          t(
+            state.pending ? t("记录已读取；恢复复核尚未完成，自动同步继续暂停。") : t("管理记录已只读检查；未请求同步。"),
+          ),
+        );
+      } catch (error) {
+        DucoroI18n.setText(
+          $("state-message"),
+          t(DucoroComponents.errorText(error)),
+        );
+      }
+    });
+    $("refresh-report").addEventListener("click", refreshReport);
+    $("retry-sync").addEventListener("click", async () => {
+      try {
+        await ducoroApi("retry", {});
+        document.dispatchEvent(new Event("ducoro-operation-queued"));
+        message(
+          t("已请求重新同步，请稍后刷新报告。"),
+          false,
+          "report-message",
+        );
+      } catch (error) {
+        message(
+          DucoroComponents.errorText(error),
+          true,
+          "report-message",
+        );
+      }
+    });
 
     if (!globalThis.magpie?.ready || !globalThis.magpie?.options) {
       message(t("请从 Magpie 中打开 Ducoro，以读取和保存插件设置。"), true);
@@ -785,7 +776,7 @@
     } else {
       try {
         await globalThis.magpie.ready;
-        if (!panel && typeof globalThis.magpie.onAction === "function")
+        if (typeof globalThis.magpie.onAction === "function")
           globalThis.magpie.onAction((action) => {
             if (action.id === "diagnostics") setTab("diagnostics");
           });

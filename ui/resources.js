@@ -104,7 +104,7 @@ if (typeof document !== "undefined") {
       if (
         event.target.type === "search" ||
         event.target.id === "bot-filter" ||
-        event.target.closest?.(".resource-search")
+        event.target.closest?.('.resource-search,[data-local-controls="true"]')
       ) {
         return;
       }
@@ -116,7 +116,6 @@ if (typeof document !== "undefined") {
 
     const equipmentCounts = new Map();
     const notify = () => {
-      invalidateComparison();
       document.dispatchEvent(new Event("input", { bubbles: true }));
     };
     const option = (selectEl, value, text) => {
@@ -142,7 +141,6 @@ if (typeof document !== "undefined") {
       check.checked = checked;
       check.addEventListener("change", () => {
         onChange(check.checked);
-        notify();
       });
       row.append(check, el("span", title));
       parent.append(row);
@@ -261,7 +259,6 @@ if (typeof document !== "undefined") {
         }
         sync();
         summary();
-        notify();
       });
 
       const notes = el("div", undefined, "resource-notes");
@@ -325,7 +322,6 @@ if (typeof document !== "undefined") {
         const nextExpected =
           model.value || DucoroPlans.planFor(draft, bot.id)?.model || data.defaultModel;
         DucoroI18n.setText(expectedNote, t`Magpie 期望：${expectedText(nextExpected)}`);
-        notify();
       });
 
       const expected =
@@ -642,7 +638,6 @@ if (typeof document !== "undefined") {
             }
             renderChoices();
             updateAccountSummary(bot.id);
-            notify();
           });
 
           body.append(labelFor(t("分配方式"), mode), state, choices);
@@ -783,6 +778,7 @@ if (typeof document !== "undefined") {
     $("copy-bots").addEventListener("click", () => {
       const bots = data?.bots?.filter((x) => x.runtime === "pi-agent") ?? [];
       const dialog = el("dialog", undefined, "preview-dialog");
+      dialog.dataset.localControls = "true";
       dialog.append(
         el("h2", t("复制与批量分配")),
         el("p", t("复制到草稿后仍需预览并保存；模型与资源需开启按 Bot 分配。账户权限需逐 Bot 配置。")),
@@ -840,15 +836,20 @@ if (typeof document !== "undefined") {
       };
       apply.onclick = () => {
         if (!plan) return;
-        const next = DucoroPlans.copyEffective(
-          DucoroWorkspace.collect(),
-          plan.source,
-          plan.targets,
-          plan.keys,
-          data,
-        );
-        DucoroWorkspace.stage(next);
-        dialog.close();
+        try {
+          const next = DucoroPlans.copyEffective(
+            DucoroWorkspace.collect(),
+            plan.source,
+            plan.targets,
+            plan.keys,
+            data,
+          );
+          DucoroWorkspace.stage(next);
+          dialog.close();
+        } catch (error) {
+          notice.className = "notice error";
+          DucoroI18n.setText(notice, t(DucoroComponents.errorText(error)));
+        }
       };
       cancel.onclick = () => dialog.close();
       dialog.append(notice, DucoroBackupFiles.actions(preview, apply, cancel));
