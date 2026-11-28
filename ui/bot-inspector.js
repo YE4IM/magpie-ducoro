@@ -2,11 +2,7 @@
   await DucoroUIReady;
   const { t, setText, setAttribute, dateTime, featureLabel, joinMessages } = DucoroI18n;
   const root = document.getElementById('resources');
-  const el = (tag, label) => {
-    const node = document.createElement(tag);
-    if (label !== undefined) setText(node, label);
-    return node;
-  };
+  const { make: el } = globalThis.DucoroComponents;
   const button = (label, action) => {
     const node = el('button', t(label));
     node.type = 'button';

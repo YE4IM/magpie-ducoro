@@ -21,6 +21,8 @@ const botId = value => typeof value === 'string' && /^agt-[a-zA-Z0-9-]+$/.test(v
 const splitList = value => [...new Set(String(value).split(/[,\r\n]/).map(s => s.trim()).filter(Boolean))]
 const coordinate = value => typeof value === 'string' && /^[^\s,=]+\/[^\s,=]+$/.test(value)
 
+const fieldError = (message, field) => Object.assign(DucoroI18n.error(message), field ? { field } : {})
+
 function optionsForDisplay(raw = {}) {
   if (!isRecord(raw)) throw DucoroI18n.error(t('插件选项格式无效，请先在 Magpie 的 JSON 选项中修复。'))
   const result = { ...structuredClone(DEFAULT_OPTIONS), ...structuredClone(raw) }
@@ -29,22 +31,22 @@ function optionsForDisplay(raw = {}) {
 }
 
 function validateFields(value) {
-  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw DucoroI18n.error(t`${key} 必须是开关值。`)
-  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw DucoroI18n.error(t('连接标识仅支持小写字母、数字和短横线。'))
-  if (!['keep', 'remove'].includes(value.onDisconnect)) throw DucoroI18n.error(t('请选择有效的断开连接处理方式。'))
+  for (const [key] of SWITCHES) if (typeof value[key] !== 'boolean') throw fieldError(t`${key} 必须是开关值。`, key)
+  if (typeof value.connectionSlug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.connectionSlug)) throw fieldError(t('连接标识仅支持小写字母、数字和短横线。'), 'connectionSlug')
+  if (!['keep', 'remove'].includes(value.onDisconnect)) throw fieldError(t('请选择有效的断开连接处理方式。'), 'onDisconnect')
   if (!['global', 'agents'].includes(value.modelScope) || !isRecord(value.botModels) || !isRecord(value.accountConnectors)) throw DucoroI18n.error(t('模型或连接器分配格式无效。'))
-  if (!['global', 'agents'].includes(value.mcpScope)) throw DucoroI18n.error(t('请选择有效的 连接器 作用域。'))
-  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw DucoroI18n.error(t('技能作用域需要一个有效的 Bot ID。'))
+  if (!['global', 'agents'].includes(value.mcpScope)) throw fieldError(t('请选择有效的 连接器 作用域。'), 'mcpScope')
+  if (!['global', 'agents'].includes(value.skillsScope) && !botId(value.skillsScope)) throw fieldError(t('技能作用域需要一个有效的 Bot ID。'), 'skillsScope')
   for (const key of ['targetAgents', 'subagentNames', 'officialProviders']) {
-    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw DucoroI18n.error(t`${key} 需要名称列表。`)
-    if (value[key].length > 256) throw DucoroI18n.error(t('单个列表最多支持 256 项。'))
+    if (!Array.isArray(value[key]) || !value[key].every(x => typeof x === 'string' && x.trim() && !/[\r\n,]/.test(x))) throw fieldError(t`${key} 需要名称列表。`, key)
+    if (value[key].length > 256) throw fieldError(t('单个列表最多支持 256 项。'), key)
   }
-  if (!value.targetAgents.every(botId)) throw DucoroI18n.error(t('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。'))
-  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw DucoroI18n.error(t('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。'))
-  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw DucoroI18n.error(t('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。'))
-  if (!isRecord(value.modelCapabilityRefs)) throw DucoroI18n.error(t('模型能力参考需要映射对象。'))
+  if (!value.targetAgents.every(botId)) throw fieldError(t('目标 Bot ID 格式应为 agt-…，请从 Ducoro 复制。'), 'targetAgents')
+  if (!value.subagentNames.every(s => /^[a-z0-9][a-z0-9-]{1,49}$/.test(s) && !['default', 'main'].includes(s))) throw fieldError(t('子代理名称需要 2–50 个小写字母、数字或短横线，不能使用 default 或 main。'), 'subagentNames')
+  if (!value.officialProviders.every(s => /^[a-z0-9][a-z0-9._-]*$/.test(s))) throw fieldError(t('官方供应商应使用目录 ID，例如 zai 或 kimi-coding。'), 'officialProviders')
+  if (!isRecord(value.modelCapabilityRefs)) throw fieldError(t('模型能力参考需要映射对象。'), 'references')
   for (const [route, ref] of Object.entries(value.modelCapabilityRefs)) {
-    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw DucoroI18n.error(t('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。'))
+    if (!coordinate(route) || (ref !== null && !coordinate(ref))) throw fieldError(t('模型映射请填写完整的 供应商/模型 或 group/组名；禁用映射时勾选「禁用自动映射」。'), 'references')
   }
   if (!isRecord(value.resourceAssignments)) throw DucoroI18n.error(t('Bot 资源分配需要对象。'))
   for (const [id, assignment] of Object.entries(value.resourceAssignments)) {

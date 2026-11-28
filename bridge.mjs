@@ -1,23 +1,4 @@
-import {selected} from "./lib/inventory-shapes.mjs"
-import {within} from './lib/path-safety.mjs'
-import {validateLibrary} from './lib/library-schema.mjs'
-import {skillFingerprint, readSkillBundle, findSkillSource, compatibleSkillMarkdown, skillName} from './lib/skill-bundle.mjs'
-import {createOperationRetries} from './lib/operation-retries.mjs'
-import {syncResources} from './lib/sync-resources.mjs'
-import {commandFailure} from './lib/operation-controls.mjs'
-import {mcpServerArgs} from './lib/mcp-update.mjs'
-import { acquireSyncLock } from "./lib/sync-lock.mjs"
-import { DEFAULTS } from "./lib/defaults.mjs"
-export { DEFAULTS } from "./lib/defaults.mjs"
-import {readOperationControls} from './lib/operation-controls.mjs'
-import { defHash,readableMcpHash } from './lib/resource-fingerprint.mjs'
-import { maintainLocalRecords } from "./lib/local-records.mjs"
-import { createSkillArtifacts } from "./lib/skill-artifacts.mjs"
-import { createOperationStore } from "./lib/operation-store.mjs"
-import { clearFileCache, fileMetrics } from "./lib/file-cache.mjs"
-import * as Plans from "./lib/plan-rules.mjs"
-import { createReadCoordinator, createProgress } from "./lib/performance.mjs"
-// Ducoro connector bridge — the Bun main module of magpie-ducoro.
+// Ducoro connector bridge — the main plugin module of magpie-ducoro.
 //
 // Runs inside magpie's plugin host. Watches the three artifacts the Ducoro
 // agent declaration (ducoro.agent.js) produces and keeps Ducoro in sync
@@ -42,35 +23,51 @@ import { createReadCoordinator, createProgress } from "./lib/performance.mjs"
 //
 // This file must export exactly one plugin function (plus _internal helpers).
 
-import { createPageService } from "./lib/page-service.mjs"
-import { readManagedState, saveManagedState } from "./lib/state-store.mjs"
-import { sourceFingerprint, createFallbackPoll } from "./lib/watch-fallback.mjs"
-import { syncAccountConnectors } from "./lib/account-connectors.mjs"
-import { withCommandRecovery } from "./lib/command-recovery.mjs"
-import { createCommandRunner } from "./lib/command-runner.mjs"
-import { watch as fsWatch } from "node:fs"
-import {
-  chmod,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  stat,
-  rm,
-  writeFile,
-} from "node:fs/promises"
-import { createHash } from "node:crypto"
+import { chmod, readFile, realpath, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { createTotalSync } from "./lib/total.mjs"
-import { createModelSync } from "./lib/model-sync.mjs"
-import { resolveCapabilityMappings, createCapabilityCatalog } from "./lib/model-capabilities.mjs"
-import { mcpCommand, needsResourceTargets, planResourceScopes, validateResourceOptions, findUnavailableAssignments } from "./lib/resource-scopes.mjs"
+import { syncAccountConnectors } from "./lib/account-connectors.mjs"
+import { createConnectionSync } from "./lib/bridge-connection.mjs"
+import { createCreationReconciler } from "./lib/bridge-creations.mjs"
+import { createBridgeLogger } from "./lib/bridge-logger.mjs"
+import { createMcpSync } from "./lib/bridge-mcp.mjs"
+import { createScheduler } from "./lib/bridge-scheduler.mjs"
+import { createSkillSync } from "./lib/bridge-skills.mjs"
+import { createWatchManager } from "./lib/bridge-watch.mjs"
+import { withCommandRecovery } from "./lib/command-recovery.mjs"
+import { createCommandRunner } from "./lib/command-runner.mjs"
+import { DEFAULTS } from "./lib/defaults.mjs"
 import { createDiagnostics, removeLegacyReports } from "./lib/diagnostics.mjs"
+import { fileMetrics } from "./lib/file-cache.mjs"
+import { validateLibrary } from "./lib/library-schema.mjs"
+import { maintainLocalRecords } from "./lib/local-records.mjs"
+import { createCapabilityCatalog } from "./lib/model-capabilities.mjs"
+import { createModelSync } from "./lib/model-sync.mjs"
+import { readOperationControls } from "./lib/operation-controls.mjs"
+import { createOperationRetries } from "./lib/operation-retries.mjs"
+import { createOperationStore } from "./lib/operation-store.mjs"
 import { validateOptions } from "./lib/options.mjs"
+import { createPageService } from "./lib/page-service.mjs"
+import { within } from "./lib/path-safety.mjs"
+import { createProgress, createReadCoordinator } from "./lib/performance.mjs"
+import * as Plans from "./lib/plan-rules.mjs"
+import { desiredResources } from "./lib/resource-plan.mjs"
+import {
+  findUnavailableAssignments,
+  needsResourceTargets,
+  planResourceScopes,
+  validateResourceOptions,
+} from "./lib/resource-scopes.mjs"
+import { readManagedState, saveManagedState } from "./lib/state-store.mjs"
+import { acquireSyncLock } from "./lib/sync-lock.mjs"
+import { syncResources } from "./lib/sync-resources.mjs"
+import { createTotalSync } from "./lib/total.mjs"
+import { isPlainObject, trimmedString as str } from "./lib/utils.mjs"
+import { createFallbackPoll, sourceFingerprint } from "./lib/watch-fallback.mjs"
+
+export { DEFAULTS }
 
 const HOME = homedir()
 
@@ -85,10 +82,9 @@ const DEFAULT_PATHS = {
   skills: join(HOME, ".ducoro", "magpie-skills"),
 }
 
-// ---------------------------------------------------------------- helpers
+const emptyState = () => ({ v: 2, connection: null, mcp: {}, skills: {} })
 
-import {sha256, slugify, mapServer, desiredResources} from "./lib/resource-plan.mjs"
-const str = (v) => (typeof v === "string" ? v.trim() : "")
+// ---------------------------------------------------------------- helpers
 
 const normalizeModel = (model) => {
   if (!model) return null
@@ -100,92 +96,13 @@ const normalizeModel = (model) => {
 // magpie hands `models` to connect() in the same shape as `model`; accept
 // arrays of objects/strings and plain id-keyed objects alike.
 const modelIds = (models) => {
-  if (Array.isArray(models))
+  if (Array.isArray(models)) {
     return models
       .map((m) => (typeof m === "string" ? m : str(m?.id)))
       .filter(Boolean)
+  }
   if (models && typeof models === "object") return Object.keys(models).filter(Boolean)
   return []
-}
-
-// ~/.ducoro/magpie-mcp.json is written in claude format: { mcpServers: {...} }
-const parseLibMcp = (json) => {
-  if (!json || typeof json !== "object") return {}
-  const servers = json.mcpServers
-  return servers && typeof servers === "object" ? servers : {}
-}
-
-// Ducoro's dead-link validator treats every backticked dotted token as a
-// file. Versions (0.9.x) and Windows executable names (heptabase.cmd) are
-// prose, not bundle files. HTML code keeps the same rendered instructions
-// without creating fake companion files or hiding missing relative paths.
-const sameSet = (a, b) => {
-  const norm = (x) => (Array.isArray(x) ? [...x].map(String).sort() : [])
-  return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
-}
-
-const sameObj = (a, b) => {
-  const norm = (x) => {
-    if (!x || typeof x !== "object" || Array.isArray(x)) return ""
-    return Object.keys(x)
-      .sort()
-      .map((k) => `${k}=${x[k]}`)
-      .join("|")
-  }
-  return norm(a) === norm(b)
-}
-
-const NOT_FOUND_RE = /not_found|notfound|no (mcp server|connection|skill|credential)|no such|unknown (slug|connection)/i
-
-// ducoro-cli cannot carry commas inside single-use --env/--header/--args
-// flags; comma-bearing values move into the encrypted credential store and
-// are referenced as {{credentials.slug}}.
-const materializeSecrets = async (def, {run, dryRun = false}) => {
-  def.credentialRefs = []
-  const conv = async (pairs, kind) => {
-    const out = []
-    for (const [k, v] of pairs) {
-      if (v.includes(",")) {
-        // ducoro-cli credential refs must be "<provider>:<variant>" in
-        // kebab-case halves
-        const cslug = `${def.slug}:${kind}-${slugify(k).slice(0, 25)}-${sha256(k).slice(0, 12)}`
-        const r = dryRun
-          ? { ok: true }
-          : await run(["credentials", "put", "--slug", cslug, "--kind", "mcp_credential", "--stdin"], {
-              stdin: v,
-              timeoutMs: 30_000,
-            })
-        if (!r.ok) throw Object.assign(Error("could not store MCP credential"), commandFailure(r))
-        out.push([k, `{{credentials.${cslug}}}`])
-        def.credentialRefs.push(cslug)
-      } else {
-        out.push([k, v])
-      }
-    }
-    return out
-  }
-  if (def.env?.length) {
-    const env = await conv(def.env, "env")
-    def.env = env
-  }
-  if (def.headers?.length) {
-    const headers = await conv(def.headers, "hdr")
-    def.headers = headers
-  }
-  return true
-}
-
-// Resolve manifest identities only after a target has selected its sources.
-const scopedSkillBundles = (bundles, sourceNames) => {
-  const groups = new Map()
-  for (const bundle of bundles.values()) {
-    if (!sourceNames.has(bundle.sourceName) || !bundle.name) continue
-    const group = groups.get(bundle.name)
-    if (group) { group.sources.push(bundle.sourceName); group.bundle = null }
-    else groups.set(bundle.name, { sources: [bundle.sourceName], bundle })
-  }
-  for (const group of groups.values()) group.sources.sort()
-  return groups
 }
 
 // ---------------------------------------------------------------- engine
@@ -193,8 +110,10 @@ const scopedSkillBundles = (bundles, sourceNames) => {
 const createEngine = (input = {}, options = {}) => {
   const opts = { ...DEFAULTS }
   const merge = (o) => {
-    if (o && typeof o === "object" && !Array.isArray(o)) {
-      for (const [k, v] of Object.entries(o)) if (v !== undefined && k in DEFAULTS) opts[k] = v
+    if (isPlainObject(o)) {
+      for (const [k, v] of Object.entries(o)) {
+        if (v !== undefined && k in DEFAULTS) opts[k] = v
+      }
     }
   }
   merge(options)
@@ -203,69 +122,88 @@ const createEngine = (input = {}, options = {}) => {
 
   const rawOptions = structuredClone(opts)
   if (!validateOptions(opts).length) Object.assign(opts, Plans.resolve(opts))
+  const initialInvalidOptions = [...validateOptions(rawOptions), ...validateOptions(opts)]
   const progress = createProgress()
   const dryRun = opts.dryRun === true || opts.dryRun === "true"
+  const runtimeOpts = { ...opts, dryRun }
 
-  const configDir = str(input?.directory) || str(input?.worktree) ||
+  const configDir =
+    str(input?.directory) ||
+    str(input?.worktree) ||
     join(pathFromEnv("XDG_CONFIG_HOME", join(HOME, ".config")), "magpie")
   const paths = {
     bridge: pathFromEnv("DUCORO_BRIDGE_FILE", DEFAULT_PATHS.bridge),
     mcp: pathFromEnv("DUCORO_BRIDGE_MCP_FILE", DEFAULT_PATHS.mcp),
     skills: pathFromEnv("DUCORO_BRIDGE_SKILLS_DIR", DEFAULT_PATHS.skills),
     library: pathFromEnv("DUCORO_BRIDGE_LIBRARY_FILE", join(configDir, "library.json")),
-    librarySkills: pathFromEnv("DUCORO_BRIDGE_LIBRARY_SKILLS_DIR", join(configDir, "library", "skills")),
+    librarySkills: pathFromEnv(
+      "DUCORO_BRIDGE_LIBRARY_SKILLS_DIR",
+      join(configDir, "library", "skills"),
+    ),
     providers: pathFromEnv("DUCORO_BRIDGE_PROVIDERS_FILE", join(configDir, "providers.json")),
-    pluginProviders: pathFromEnv("DUCORO_BRIDGE_PLUGIN_PROVIDERS_FILE", join(configDir, "plugin-providers.json")),
+    pluginProviders: pathFromEnv(
+      "DUCORO_BRIDGE_PLUGIN_PROVIDERS_FILE",
+      join(configDir, "plugin-providers.json"),
+    ),
+    instructions: pathFromEnv(
+      "DUCORO_BRIDGE_INSTRUCTIONS_FILE",
+      join(HOME, ".ducoro", "magpie-instructions.md"),
+    ),
+    ducoroHome: pathFromEnv("DUCORO_BRIDGE_DUCORO_HOME", join(HOME, ".ducoro")),
   }
-  const stateDir = pathFromEnv(
-    "DUCORO_BRIDGE_STATE_DIR",
-    join(configDir, "ducoro-bridge"),
-  )
+  const stateDir = pathFromEnv("DUCORO_BRIDGE_STATE_DIR", join(configDir, "ducoro-bridge"))
   const stateFile = join(stateDir, "state.json")
-  paths.instructions = pathFromEnv("DUCORO_BRIDGE_INSTRUCTIONS_FILE", join(HOME, ".ducoro", "magpie-instructions.md"))
-  paths.ducoroHome = pathFromEnv("DUCORO_BRIDGE_DUCORO_HOME", join(HOME, ".ducoro"))
+
   const diagnostics = createDiagnostics({ options: opts })
+  const logger = createBridgeLogger({ diagnostics })
+  const { rememberSecret, log, warnOnce, errMsg, isNotFound } = logger
+
   let totalForRound = null
   let capabilitiesForRound = null
+  let watching = false
+  let stopped = false
+  let lifecycleGeneration = 0
+  let interval = null
+  let watchFallback = null
+  let wakeFallback = () => {}
+  let watchDegraded = false
+  let pageService = null
+  let dirtySkillPaths = new Set()
+  let roundSkillPaths = null
+  let dirtyFeatures = new Set()
+  let roundFeatures = null
+  let syncing = false
+  let disconnectNoted = false
+  let gatewayMissingSince = null
+  let activeGatewayController = null
+  let resourcePlan = null
+  let desiredPlan = null
 
-  const knownSecrets = new Set()
-  const rememberSecret = (value) => {
-    if (value !== undefined && value !== null && String(value)) {
-      const text = String(value)
-      knownSecrets.add(text)
-      // CLI errors sometimes echo the token without its authorization scheme.
-      const authorization = /^(?:Bearer|Basic)\s+(.+)$/i.exec(text)
-      if (authorization) knownSecrets.add(authorization[1])
-    }
-  }
-  const redact = (value) => {
-    let out = String(value)
-    for (const secret of [...knownSecrets].sort((a, b) => b.length - a.length)) out = out.split(secret).join("[redacted]")
-    return out.replace(/https?:\/\/[^\s<>"')]+/g, (text) => {
-      try {
-        const url = new URL(text)
-        if (url.username || url.password) { url.username = "redacted"; url.password = "redacted" }
-        for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, "redacted")
-        if (url.hash) url.hash = "redacted"
-        return url.toString()
-      } catch { return "[redacted-url]" }
+  const gatewayAbortError = () =>
+    Object.assign(new Error("gateway sync superseded by a resource change"), {
+      name: "AbortError",
+      code: "GATEWAY_SUPERSEDED",
     })
-  }
-  const log = (...a) => console.log("[ducoro-bridge]", ...a.map(redact))
-  const warned = new Set()
-  const warnOnce = (key, msg) => {
-    // A repeated conflict is still part of this round's diagnostics even when
-    // the human-readable log has already been emitted by this host.
-    const feature = key.startsWith("conn:") ? "connection" : key.startsWith("mcp:") ? "mcp" : key.startsWith("skill:") ? "skills" : null
-    if (feature) diagnostics.retry("ownership-conflict", feature === "connection" ? ["connection", "models"] : [feature])
-    if (warned.has(key)) return
-    warned.add(key)
-    log("note:", msg)
-  }
+  const interruptGatewayReads = () => activeGatewayController?.abort()
+
+  const manualRetries = createOperationRetries()
+  let roundRetries = null
+
+  const scheduler = createScheduler({
+    diagnostics,
+    progress,
+    manualRetries,
+    syncAll: (reason) => syncAll(reason),
+    interruptGatewayReads,
+    log,
+    isWatching: () => watching,
+    onDirtyFeature: (feature) => dirtyFeatures.add(feature),
+  })
+  const { requestRetry, trigger } = scheduler
 
   // ------------------------------------------------------------- state
 
-  let state = { v: 2, connection: null, mcp: {}, skills: {} }
+  let state = emptyState()
   let stateLoaded = false
 
   const loadState = async () => {
@@ -275,748 +213,209 @@ const createEngine = (input = {}, options = {}) => {
     stateLoaded = true
   }
 
-  const saveState = async (paths) => {
+  const saveState = async (savePaths) => {
     if (dryRun) return
     try {
       // The store captures values now and serializes durable writes itself.
-      await saveManagedState(stateFile, state, { paths })
+      await saveManagedState(stateFile, state, { paths: savePaths })
     } catch (e) {
       log("cannot save state:", e?.message ?? e)
       throw e
     }
   }
 
-  const manualRetries = createOperationRetries()
-  let roundRetries = null
-  const operations = createOperationStore({ getState: () => state, save: saveState, onDefer: ms => requestRetry("operation-backoff",ms) })
+  const operations = createOperationStore({
+    getState: () => state,
+    save: saveState,
+    onDefer: (ms) => requestRetry("operation-backoff", ms),
+  })
 
   // --------------------------------------------------------------- cli
 
-  let activeGatewayController = null
-  const gatewayAbortError = () => Object.assign(new Error("gateway sync superseded by a resource change"), { name: "AbortError", code: "GATEWAY_SUPERSEDED" })
-  const interruptGatewayReads = () => activeGatewayController?.abort()
-
-  const run = createReadCoordinator(withCommandRecovery(createCommandRunner({opts,dryRun,rememberSecret,log,getGatewaySignal: () => activeGatewayController?.signal,gatewayAbortError})))
-
-  const errMsg = (r) => {
-    const j = r.json?.error?.message ?? r.json?.error?.code
-    if (j) return redact(j)
-    const line = (r.stderr || r.stdout || "").trim().split("\n")[0]
-    return redact(line || `exit code ${r.code}`)
-  }
-
-  const isNotFound = (r) =>
-    !r.ok && (NOT_FOUND_RE.test(r.stderr) || NOT_FOUND_RE.test(r.stdout) || NOT_FOUND_RE.test(errMsg(r)))
-
-  const readJson = async (p) => {
-    try {
-      return JSON.parse(await readFile(p, "utf8"))
-    } catch {
-      return null
-    }
-  }
+  const run = createReadCoordinator(
+    withCommandRecovery(
+      createCommandRunner({
+        opts,
+        dryRun,
+        rememberSecret,
+        log,
+        getGatewaySignal: () => activeGatewayController?.signal,
+        gatewayAbortError,
+      }),
+    ),
+  )
 
   const readJsonDetailed = async (path) => {
-    try { return { ok: true, value: JSON.parse(await readFile(path, "utf8")) } }
-    catch (e) { return { ok: false, missing: e.code === "ENOENT" } }
+    try {
+      return { ok: true, value: JSON.parse(await readFile(path, "utf8")) }
+    } catch (e) {
+      return { ok: false, missing: e.code === "ENOENT", error: e }
+    }
   }
 
-  // ------------------------------------------------- capability mapping
+  const readJson = async (path) => {
+    const result = await readJsonDetailed(path)
+    return result.ok ? result.value : null
+  }
 
-  // Map magpie model ids ("zcode/GLM-5.3-Flash") to Ducoro catalog entries
-  // ("zai/glm-5.3-flash") so explicit thinking levels resolve. Best effort:
-  // refs are optional in Ducoro.
+  const loadLibrary = async () => {
+    const result = await readJsonDetailed(paths.library)
+    if (!result.ok) {
+      throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`, {
+        cause: result.error,
+      })
+    }
+    try {
+      validateLibrary(result.value)
+    } catch (cause) {
+      throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`, {
+        cause,
+      })
+    }
+    return { ...result.value, mcp: result.value.mcp ?? [], skills: result.value.skills ?? [] }
+  }
+
+  // ---------------------------------------------------------- adapters
+
   const capabilityCatalog = createCapabilityCatalog({ run, log })
-  const loadCatalog = () => capabilityCatalog.load()
-
-  const refsFor = async (ids, existing, descriptors) => {
-    const [cat, providers, pluginProviders] = await Promise.all([
-      ids.length ? loadCatalog() : null,
-      readJsonDetailed(paths.providers), readJsonDetailed(paths.pluginProviders),
-    ])
-    for (const result of [providers, pluginProviders]) {
-      if (!result.ok && !result.missing) requestRetry("model-metadata")
-    }
-    return resolveCapabilityMappings({
-      ids, catalog: cat, existing, exported: descriptors,
-      providers: providers.ok ? providers.value : null,
-      pluginProviders: pluginProviders.ok ? pluginProviders.value : [],
-      metadataUnavailable: [providers, pluginProviders].some(result => !result.ok && !result.missing),
-      previous: state.modelCapabilities?.slug === String(opts.connectionSlug) ? state.modelCapabilities : null,
-      overrides: opts.modelCapabilityRefs, officialProviders: opts.officialProviders,
-    })
-  }
-
-  const reportCapabilities = async (plan, applied) => {
-    capabilitiesForRound = { applied, entries: plan.entries, updatedAt:new Date().toISOString(), roundId:diagnostics.token() }
-    for (const entry of plan.entries) {
-      if (entry.status !== "matched" || entry.warnings.length) warnOnce(
-        `capability:${JSON.stringify(entry)}`,
-        `model ${entry.id}: ${entry.status}; ${entry.reference ? `reference ${entry.reference} (${entry.source})` : "no automatic reference; set modelCapabilityRefs if needed"}` +
-          (entry.warnings.length ? `; ${entry.warnings.join(", ")}` : "") + "; details: open Ducoro sync diagnostics",
-      )
-    }
-  }
-
-  const stageCapabilities = async (plan) => {
-    if (!dryRun) {
-      state.modelCapabilities = {
-        ...(state.modelCapabilities?.slug === String(opts.connectionSlug) ? state.modelCapabilities : {}),
-        slug: String(opts.connectionSlug), pending: { refs: plan.refs, provenance: plan.provenance },
-      }
-      await saveState()
-    }
-    await reportCapabilities(plan, false)
-  }
-
-  const commitCapabilities = async (plan) => {
-    const next = { slug: String(opts.connectionSlug), ...plan.provenance }
-    if (!dryRun && JSON.stringify(state.modelCapabilities) !== JSON.stringify(next)) {
-      state.modelCapabilities = next
-      await saveState()
-    }
-    await reportCapabilities(plan, true)
-  }
-
-  const modelSync = createModelSync({ operations,
-    opts: { ...opts, dryRun }, run, getState: () => state, save: saveState,
-    requestRetry: (...args) => requestRetry(...args), log,
+  const modelSync = createModelSync({
+    operations,
+    opts: runtimeOpts,
+    run,
+    getState: () => state,
+    save: saveState,
+    requestRetry,
+    log,
     isCurrent: () => !stopped && !activeGatewayController?.signal.aborted,
     onStatus: (status, details) => diagnostics.stage("models", status, details),
   })
 
-  // -------------------------------------------------------- connection
+  const { syncConnection, removeConnection } = createConnectionSync({
+    opts,
+    dryRun,
+    paths,
+    run,
+    getState: () => state,
+    saveState,
+    requestRetry,
+    log,
+    warnOnce,
+    errMsg,
+    isNotFound,
+    modelSync,
+    capabilityCatalog,
+    diagnostics,
+    readJsonDetailed,
+    setCapabilitiesForRound: (value) => { capabilitiesForRound = value },
+  })
 
-  const getConnection = async (slug) => {
-    const r = await run(["connections", "get", slug], { timeoutMs: 30_000 })
-    if (r.ok) {
-      // Parse failures also have json: null; only the explicit JSON literal means absent.
-      if (r.json === null && r.stdout.trim() === "null") return null
-      const connection = r.json?.connection ?? r.json
-      if (dryRun || (connection && typeof connection === "object" && !Array.isArray(connection))) return connection
-      throw new Error("connections get returned an unknown response")
+  const isSuperseded = () => watching && scheduler.isPending()
+
+  const creations = createCreationReconciler({
+    paths,
+    run,
+    getState: () => state,
+    saveState,
+    listMcpSlugs: (...args) => mcp.listMcpSlugs(...args),
+    skillNames: (...args) => skills.skillNames(...args),
+    skillCommand: (...args) => skills.skillCommand(...args),
+    log,
+    requestRetry,
+  })
+
+  const mcp = createMcpSync({
+    dryRun,
+    run,
+    getState: () => state,
+    saveState,
+    operations,
+    diagnostics,
+    requestRetry,
+    log,
+    warnOnce,
+    errMsg,
+    isNotFound,
+    isSuperseded,
+    reconcileCreations: (kind) => creations.reconcileCreations(kind),
+  })
+
+  const classifyChange = (path) => {
+    if (path === paths.instructions) return ["total"]
+    if (path === paths.mcp) return ["mcp"]
+    if ([paths.bridge, paths.providers, paths.pluginProviders].includes(path)) return ["gateway"]
+    if ([paths.skills, paths.librarySkills, ...skills.activeSkillRoots()].some((root) => within(root, path))) {
+      return ["skills"]
     }
-    if (isNotFound(r)) return null
-    throw new Error(`connections get ${slug} failed: ${errMsg(r)}`)
+    return ["all"]
   }
 
-  const connectionArgs = (want, { creating = false } = {}) => {
-    const a = []
-    if (want.model) a.push("--model", want.model)
-    if (want.models.length) a.push("--models", want.models.join(","))
-    const refs = Object.entries(want.refs)
-    // Creation rejects empty refs; updates require an empty value to clear old refs.
-    if (refs.length || !creating) a.push("--capability-refs", refs.map(([k, v]) => `${k}=${v}`).join(","))
-    return a
-  }
-
-  const createConnection = async (slug, want, key) => {
-    const r = await run(
-      [
-        "connections", "add-apikey", "custom-openai-compat",
-        "--slug", slug,
-        "--name", want.name,
-        "--base-url", want.baseUrl,
-        ...connectionArgs(want, { creating: true }),
-        "--stdin",
-      ],
-      { stdin: key },
-    )
-    if (!r.ok) {
-      log(`creating connection ${slug} failed (kept for retry): ${errMsg(r)}`)
-      requestRetry("gateway-sync")
-      return false
-    }
-    log(`connection ${slug} created -> ${want.baseUrl}${want.model ? ` (model ${want.model})` : ""}`)
-    return true
-  }
-
-  const updateConnection = async (slug, want, key) => {
-    const r = await run(
-      [
-        "connections", "update-apikey", slug,
-        "--name", want.name,
-        "--base-url", want.baseUrl,
-        ...connectionArgs(want),
-        "--stdin",
-      ],
-      { stdin: key },
-    )
-    if (!r.ok) {
-      log(`updating connection ${slug} failed (kept for retry): ${errMsg(r)}`)
-      requestRetry("gateway-sync")
-      return false
-    }
-    log(`connection ${slug} updated -> ${want.baseUrl}${want.model ? ` (model ${want.model})` : ""}`)
-    return true
-  }
-
-  const syncConnection = async ({ gwUrl, gwV1, key, model, models, descriptors }) => {
-    const slug = String(opts.connectionSlug)
-    if (model && models.length && !models.includes(model)) {
-      log("selected model is absent from Magpie's export; keeping the connection and Bots for retry")
-      requestRetry("gateway-model-catalog")
-      return
-    }
-    const cur = await getConnection(slug)
-    const capabilityPlan = await refsFor(models, cur?.modelCapabilityRefs, descriptors)
-    const want = {
-      name: String(opts.connectionName),
-      baseUrl: gwV1,
-      model,
-      models,
-      refs: capabilityPlan.refs,
-    }
-    const keyHash = sha256(key)
-
-    if (!cur) {
-      await stageCapabilities(capabilityPlan)
-      if (await createConnection(slug, want, key)) {
-        state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
-        await saveState()
-        if (dryRun) return
-        const saved = await getConnection(slug)
-        if (saved && str(saved.baseUrl) === want.baseUrl && str(saved.defaultModel) === want.model && sameSet(saved.models, want.models)
-          && sameObj(saved.modelCapabilityRefs, want.refs)) {
-          await commitCapabilities(capabilityPlan)
-          await modelSync.sync({ ...saved, slug })
-          return true
-        } else throw new Error("created connection readback differs; Bot sync deferred")
+  const watchManager = createWatchManager({
+    paths,
+    getActiveSkillRoots: () => skills.activeSkillRoots(),
+    classifyChange,
+    onFilesChanged: (changedPath, features) => {
+      for (const feature of features) dirtyFeatures.add(feature)
+      if (features.includes("all")) skills.invalidateSkillCache()
+      else if (features.includes("skills")) {
+        dirtySkillPaths.add(changedPath)
+        skills.handleSkillChange(changedPath)
       }
-      return
-    }
+    },
+    onDegradedChange: (degraded) => {
+      watchDegraded = degraded
+      if (degraded) wakeFallback()
+    },
+    onWatchEvent: () => trigger("file-change"),
+    diagnostics,
+    warnOnce,
+    log,
+    isWatching: () => watching,
+  })
 
-    if (!state.connection || state.connection.slug !== slug) {
-      // A profile with this slug exists but this plugin did not create it.
-      // Adopt it only when it already points at this gateway; never touch a
-      // stranger's route.
-      if (str(cur.baseUrl) === want.baseUrl) {
-        log(`adopting existing connection ${slug}`)
-        state.connection = { slug, keyHash: null, baseUrl: want.baseUrl, model: str(cur.defaultModel) }
-      } else {
-        warnOnce(
-          `conn:${slug}`,
-          `connection "${slug}" exists and was not created by this plugin; ` +
-            `pick another connectionSlug option to let the bridge create its own`,
-        )
-        return
-      }
-    }
+  const skills = createSkillSync({
+    opts,
+    dryRun,
+    paths,
+    stateDir,
+    run,
+    getState: () => state,
+    saveState,
+    operations,
+    diagnostics,
+    requestRetry,
+    log,
+    warnOnce,
+    errMsg,
+    isNotFound,
+    isWatching: () => watching,
+    isSuperseded,
+    refreshWatches: () => watchManager.refreshWatches(),
+    reconcileCreations: (kind) => creations.reconcileCreations(kind),
+  })
 
-    await modelSync.prepare(slug, model, str(cur.defaultModel))
-    const changed =
-      state.connection.keyHash !== keyHash ||
-      str(cur.baseUrl) !== want.baseUrl ||
-      str(cur.defaultModel) !== want.model ||
-      !sameSet(cur.models, want.models) ||
-      !sameObj(cur.modelCapabilityRefs, want.refs)
-    if (changed) await stageCapabilities(capabilityPlan)
-    if (changed && !await updateConnection(slug, want, key)) return
-    if (changed) {
-      state.connection = { slug, keyHash, baseUrl: want.baseUrl, model: want.model }
-      await saveState()
-    }
-    // Reconcile even when the route is unchanged: this also repairs stale Bot
-    // IDs left by 0.3.0 or retries a Bot update after a connection write succeeded.
-    const saved = changed ? await getConnection(slug) : cur
-    if (saved && str(saved.baseUrl) === want.baseUrl && str(saved.defaultModel) === want.model && sameSet(saved.models, want.models)
-      && sameObj(saved.modelCapabilityRefs, want.refs)) {
-      await commitCapabilities(capabilityPlan)
-      await modelSync.sync({ ...saved, slug })
-      return true
-    } else throw new Error("saved connection readback differs; Bot sync deferred")
-  }
-
-  const removeConnection = async () => {
-    const slug = state.connection?.slug
-    if (!slug) return
-    const r = await run(["connections", "rm", slug], { timeoutMs: 30_000 })
-    if (r.ok || isNotFound(r)) {
-      log(`connection ${slug} removed`)
-      state.connection = null
-      await saveState()
-    } else {
-      log(`removing connection ${slug} failed: ${errMsg(r)}`)
-      requestRetry("gateway-sync")
-    }
-  }
-
-  // --------------------------------------------------------------- mcp
-
-  const listMcpSlugs = async (scope) => {
-    const r = await run(mcpCommand(scope, "list"), { timeoutMs: 30_000 })
-    if (!r.ok) {
-      log(`mcp list (${scope}) failed: ${errMsg(r)}`)
-      requestRetry("mcp-sync")
-      return null
-    }
-    const arr = Array.isArray(r.json?.servers) ? r.json.servers : Array.isArray(r.json) ? r.json : null
-    if (!arr) {
-      if (dryRun) return new Map()
-      log("mcp list returned an unknown response; resource changes postponed")
-      requestRetry("mcp-sync")
-      return null
-    }
-    return new Map(arr.filter((s) => str(s?.slug)).map((s) => [s.slug, s]))
-  }
-
-  const addMcpServer = async (scope, def) =>
-    run(
-      mcpCommand(scope, "add", "--slug", def.slug, "--name", def.name, "--transport", def.transport, ...mcpServerArgs(def)),
-      { timeoutMs: 60_000 },
-    )
-
-  const updateMcpServer = async (scope, slug, def) => {
-    const current=await run(mcpCommand(scope,'show',slug),{timeoutMs:30000});
-    if(!current.ok)return current;
-    let args;
-    try{args=mcpServerArgs(def,true,current.json?.server??current.json);}
-    catch(error){return {ok:false,json:{error:{code:'configuration-conflict',message:error.message}}};}
-    return run(mcpCommand(scope,'update',slug,'--name',def.name,'--transport',def.transport,...args),{timeoutMs:60000});
-  }
-
-  const probeMcp = async (scope, slug, roundId) => {
-    const r = await run(mcpCommand(scope, "probe", slug, "--timeout-ms", "15000"), { timeoutMs: 30_000 })
-    if (r.ok) {
-      const tools = r.json?.tools
-      const n = Array.isArray(tools) ? tools.length : typeof r.json?.toolsCount === "number" ? r.json.toolsCount : null
-      log(`mcp ${slug} probe ok${n != null ? ` (${n} tools)` : ""}`)
-    } else {
-      log(`mcp ${slug} probe failed: ${errMsg(r)}`)
-      if (diagnostics.isCurrent(roundId)) requestRetry("mcp-probe")
-    }
-    await diagnostics.probeResult(roundId, r.ok)
-    return r.ok
-  }
-
-  // Selection rules are shared with the page service.
-
-  const loadLibrary = async () => {
-    const lib = await readJson(paths.library)
-    try { validateLibrary(lib) } catch {
-      throw new Error(`cannot read valid Magpie selections at ${paths.library}; will retry`)
-    }
-    return { ...lib, mcp: lib.mcp ?? [], skills: lib.skills ?? [] }
-  }
-
-  const pendingMcpProbes = new Map()
-  let forceMcpProbe = false
-  let authorizedMcpSlugs = new Set()
-  let probeDrain = null
-  const drainMcpProbes = () => {
-    if (probeDrain) return probeDrain
-    probeDrain = (async () => {
-      while (pendingMcpProbes.size) {
-        const [id, { scope, slug, roundId }] = pendingMcpProbes.entries().next().value
-        pendingMcpProbes.delete(id)
-        if (authorizedMcpSlugs.has(id)) await probeMcp(scope, slug, roundId)
-      }
-    })().finally(() => { probeDrain = null })
-    return probeDrain
-  }
-
-  const migrateMcpOwnership = async () => {
-    let changed = false
-    for (const [id, mine] of Object.entries(state.mcp)) {
-      if (typeof mine === "string") {
-        state.mcp[`global:${id}`] = { scope: "global", slug: id, hash: mine }
-        delete state.mcp[id]
-        changed = true
-      } else if (!mine || !["global"].includes(mine.scope) && !/^agt-[A-Za-z0-9-]+$/.test(mine.scope ?? "") ||
-        typeof mine.slug !== "string" || id !== `${mine.scope}:${mine.slug}`) {
-        throw new Error("invalid MCP ownership state; scope changes postponed")
-      }
-    }
-    if (changed) await saveState()
-  }
-
-  const reconcileCreations = async kind => {
-    for(const [creationId,tx] of Object.entries(state.creations??{})) {
-      const id=`${tx.scope}:${tx.name}`
-      if(tx.kind!==kind)continue;
-      try {
-        if(kind==='mcp') {
-          const listed=await listMcpSlugs(tx.scope);if(!listed)throw Error('MCP inventory unavailable');
-          if(listed.has(tx.name)) {
-            const shown=await run(mcpCommand(tx.scope,'show',tx.name),{timeoutMs:5000});
-            if(!shown.ok || (shown.json?.server??shown.json)?.slug!==tx.name || readableMcpHash(shown.json)!==tx.contentHash)throw Error('MCP creation readback differs or is incomplete');
-            state.mcp[id]={scope:tx.scope,slug:tx.name,hash:tx.hash,sourceName:tx.sourceName};
-          }
-        } else {
-          const listed=await skillNames(tx.scope);if(!listed)throw Error('Skill inventory unavailable');
-          if(listed.has(tx.name)) {
-            const shown=await run(skillCommand(tx.scope,'show',tx.name),{timeoutMs:5000});
-            const item=shown.json?.skill??shown.json;
-            const info=await run(['info'],{timeoutMs:5000});
-            if(!shown.ok||item?.name!==tx.name||!item.dirPath||!info.ok||!info.json?.paths?.ducoroHome)throw Error('Skill creation readback unavailable');
-            const home=await realpath(paths.ducoroHome),installed=await realpath(item.dirPath);
-            if(home!==await realpath(info.json.paths.ducoroHome)||!within(home,installed,{allowRoot:false})||process.env.DUCORO_SERVER_URL&&!['127.0.0.1','localhost','[::1]'].includes(new URL(process.env.DUCORO_SERVER_URL).hostname))throw Error('Skill readback is not local');
-            if((await skillFingerprint(installed,{includeModes:false})).hash!==tx.contentHash)throw Error('Skill creation content differs');
-            state.skills[id]={scope:tx.scope,name:tx.name,sourceName:tx.sourceName,hash:tx.hash,dir:tx.dir};
-          }
-        }
-        delete state.creations[creationId];await saveState();
-      } catch(error) {
-        log(`Pending ${kind} creation ${id}: ${error.message}; inspect full content before recovery`);
-        requestRetry(kind==='mcp'?'mcp-conflict':'skill-conflict');
-      }
-    }
-  }
-
-  const syncMcp = async (library) => {
-    await reconcileCreations('mcp')
-    await migrateMcpOwnership()
-    const wanted = new Map()
-    for (const scope of resourcePlan.mcpScopes) {
-      for (const entry of desiredPlan.mcp.get(scope)?.values() ?? []) {
-        if (entry.status === 'unknown') requestRetry('mcp-sync')
-        wanted.set(`${scope}:${entry.slug}`, {scope, slug:entry.slug, def:entry.definition})
-      }
-    }
-    authorizedMcpSlugs = new Set(wanted.keys())
-    const scopes = new Set([...resourcePlan.mcpScopes, ...Object.values(state.mcp).map(mine => mine.scope)])
-    const current = new Map()
-    for (const scope of scopes) current.set(scope, await listMcpSlugs(scope))
-
-    // Apply every known revocation before additions. On a scope switch, a
-    // failed old-layer cleanup must not be described as successful isolation.
-    let revocationFailed = false
-    for (const [id, mine] of Object.entries(state.mcp)) {
-      if (wanted.has(id)) continue
-      pendingMcpProbes.delete(id)
-      if (!current.get(mine.scope)) { revocationFailed = true; continue }
-      const r = await run(mcpCommand(mine.scope, "rm", mine.slug), { timeoutMs: 30_000 })
-      if (r.ok || isNotFound(r)) {
-        delete state.mcp[id]
-        await saveState()
-        log(`removed MCP server ${mine.slug} (${mine.scope}; no longer selected)`)
-      } else {
-        log(`removing MCP server ${mine.slug} (${mine.scope}) failed: ${errMsg(r)}`)
-        requestRetry("mcp-sync")
-        revocationFailed = true
-      }
-    }
-    if (revocationFailed) return
-
-    for (const [id, { scope, slug, def: source }] of wanted) {
-      if (watching && pending) return
-      const layer = current.get(scope)
-      if (!source || !layer || state.creations?.['mcp:'+id]) continue
-      if (layer.has(slug) && !state.mcp[id]) {
-        warnOnce(`mcp:${id}`, `MCP slug "${slug}" (${scope}) belongs to the user; skipped`)
-        requestRetry("mcp-conflict")
-        continue
-      }
-      // Each scope receives its own copy: materializing credential references
-      // in one Bot must not change another Bot's source digest.
-      const def = structuredClone(source)
-      const hash = defHash(def)
-      const mine = state.mcp[id]
-      const changed = !layer.has(slug) || mine?.hash !== hash
-      const operation = await operations.begin('mcp',scope,slug,hash,['revoke-mcp'],!changed)
-      if (!operation) {
-        if(changed)requestRetry('mcp-sync');
-        if (forceMcpProbe || layer.get(slug)?.connectionStatus !== 'connected') pendingMcpProbes.set(id, {scope,slug,roundId:diagnostics.token()});
-        continue
-      }
-      if (changed) {
-        try { await materializeSecrets(def, {run, dryRun}) }
-        catch (error) {
-          await operations.finish(operation,false,[],error)
-          log(`mcp ${slug} (${scope}) skipped: could not store its credential`)
-          requestRetry("mcp-sync")
-          continue
-        }
-      }
-      if (changed) {
-        if(!layer.has(slug)) {
-          state.creations??={};state.creations['mcp:'+id]={kind:'mcp',scope,name:slug,sourceName:source.name,hash,contentHash:defHash(def)};
-          await saveState();
-        }
-        const r = layer.has(slug) ? await updateMcpServer(scope, slug, def) : await addMcpServer(scope, def)
-        if (r.ok) {
-          state.mcp[id] = { scope, slug, hash, sourceName: source.name }
-          if(state.creations)delete state.creations['mcp:'+id]
-          await operations.finish(operation,true,[['mcp',id]])
-          await saveState()
-          pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
-        } else {
-          await operations.finish(operation,false,[],Object.assign(Error(errMsg(r)),commandFailure(r)))
-          log(`saving MCP server ${slug} (${scope}) failed (kept for retry): ${errMsg(r)}`)
-          requestRetry("mcp-sync")
-        }
-      } else {
-        await operations.finish(operation)
-        if (forceMcpProbe || layer.get(slug)?.connectionStatus !== "connected")
-        pendingMcpProbes.set(id, { scope, slug, roundId: diagnostics.token() })
-      }
-    }
-  }
-
-  // ------------------------------------------------------------ skills
-
-  // Keep only paths and the small manifest in memory. A scan hashes one file
-  // at a time; staging is needed only for a changed bundle. Watches invalidate
-  // the cache, while explicit/periodic reconciliations still hash all bytes.
-  const activeSkillRoots = new Set()
-  const skillBundleCache = new Map()
-  let skillCacheGeneration = 0
-  const invalidateSkillCache = () => { skillCacheGeneration++; skillBundleCache.clear(); clearFileCache() }
-
-  const readBundle = readSkillBundle
-
-  const artifacts = createSkillArtifacts(join(stateDir, "skill-artifacts"), readBundle)
-
-  const skillCommand = (scope, action, ...args) => scope === "global"
-    ? ["skill", action, ...args]
-    : ["agent", "skill", action, scope, ...args]
-
-  const skillNames = async (scope) => {
-    const r = await run(skillCommand(scope, "list"), { timeoutMs: 30_000 })
-    if (!r.ok) {
-      log(`skill list (${scope}) failed: ${errMsg(r)}`)
-      requestRetry("skill-list")
-      return null
-    }
-    if (dryRun && !r.json) return new Set()
-    const raw = r.json
-    const arr = Array.isArray(raw) ? raw : raw?.skills ?? raw?.data
-    if (!Array.isArray(arr)) { requestRetry("skill-list"); return null }
-    return new Set(arr.map((s) => typeof s === "string" ? s : str(s?.name) || str(s?.slug)).filter(Boolean))
-  }
-
-  const listSkillBundles = async (library) => {
-    const found = new Map()
-    const candidates = []
-    activeSkillRoots.clear()
-    for (const item of selected(library.skills)) {
-      const sourceName = str(item.name)
-      if (!sourceName || basename(sourceName) !== sourceName || sourceName === "." || sourceName === "..") continue
-      let dir
-      try {dir = await findSkillSource(sourceName,[paths.skills,paths.librarySkills])}
-      catch {requestRetry('skill-source');found.set(sourceName,{sourceName});continue}
-      if (!dir) {
-        log(`selected skill ${sourceName} has no readable bundle; will retry`)
-        requestRetry("skill-source")
-        found.set(sourceName, { sourceName })
-        continue
-      }
-      try {
-        const root = await realpath(dir)
-        activeSkillRoots.add(root)
-        candidates.push({ sourceName, dir, root })
-      } catch (e) {
-        log(`selected skill ${sourceName} cannot be resolved: ${e.message}`)
-        requestRetry("skill-source")
-        found.set(sourceName, { sourceName })
-      }
-    }
-    // Discover all roots before refreshing so one source cannot retire the
-    // next source's watcher while this round is still scanning its bytes.
-    if (watching) await refreshWatches()
-    for (const { sourceName, dir, root } of candidates) {
-      try {
-        const generation = skillCacheGeneration
-        const bundle = (watching && skillBundleCache.get(root)) || await readBundle(dir)
-        if (watching && generation === skillCacheGeneration) skillBundleCache.set(root, bundle)
-        const name = skillName(bundle.md, sourceName)
-        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("invalid skill manifest name")
-        found.set(sourceName, { name, sourceName, dir, ...bundle })
-      } catch (e) {
-        log(`selected skill ${sourceName} cannot be prepared: ${e.message}`)
-        requestRetry("skill-source")
-        found.set(sourceName, { sourceName })
-      }
-    }
-    for (const root of skillBundleCache.keys()) if (!activeSkillRoots.has(root)) skillBundleCache.delete(root)
-    return found
-  }
-
-  let roundSkillBundles = null
-  const skillBundlesForRound = library => roundSkillBundles ??= listSkillBundles(library)
-
-  const removeNamedSkill = async (scope, name) => {
-    const r = await run(skillCommand(scope, "remove", name), { timeoutMs: 30_000 })
-    if (r.ok || isNotFound(r)) return true
-    log(`removing skill ${name} failed: ${errMsg(r)}`)
-    requestRetry("skill-cleanup")
-    return false
-  }
-
-  const removeSkill = async (id, mine) => {
-    // A cancelled assignment also owns its interrupted replacement backup.
-    // Retain the transaction until both names have been removed successfully.
-    if (!(await removeNamedSkill(mine.scope, mine.name))) return false
-    if (mine.replacement && !(await removeNamedSkill(mine.scope, mine.replacement.backupName))) return false
-    delete state.skills[id]
-    await saveState()
-    log(`removed skill ${mine.name} (${mine.scope})`)
-    return true
-  }
-
-  const pruneSkills = async (library) => {
-    await reconcileCreations("skills")
-    let complete = true
-    const sourceNames = new Map(resourcePlan.skillScopes.map(scope => [scope,
-      new Set(desiredPlan.skills.get(scope)?.keys() ?? []),
-    ]))
-    for (const [id, mine] of Object.entries(state.skills)) {
-      if (!mine.scope) {
-        delete state.skills[id]
-        state.skills[`global:${id}`] = { ...mine, scope: "global", name: id, sourceName: id }
-      }
-    }
-    const bundles = opts.syncSkills ? await skillBundlesForRound(library) : new Map()
-    const conflicts = new Map([...sourceNames].map(([scope,names]) => [scope,
-      new Set([...scopedSkillBundles(bundles,names)].filter(([,group]) => !group.bundle).map(([name]) => name)),
-    ]))
-    for (const [id, mine] of Object.entries(state.skills)) {
-      // A selected ambiguous name cannot authorize deleting its current import.
-      if (conflicts.get(mine.scope)?.has(mine.name)) continue
-      if (!sourceNames.get(mine.scope)?.has(mine.sourceName) && !(await removeSkill(id, mine))) complete = false
-    }
-    if (![...sourceNames.values()].some(names => names.size)) { activeSkillRoots.clear(); invalidateSkillCache() }
-    return complete
-  }
-
-  // import refuses an existing valid target. Rename the complete old bundle
-  // instead of deleting it, and journal the backup in the existing owner entry
-  // before touching Ducoro. The journal survives app/CLI host restarts.
-  const recoverSkillReplacement = async (id, mine, existing) => {
-    const tx = mine.replacement
-    if (!tx) return true
-    const hasOriginal = existing.has(mine.name)
-    const hasBackup = existing.has(tx.backupName)
-    if (hasOriginal && tx.phase === "installed") {
-      if (hasBackup && !(await removeNamedSkill(mine.scope, tx.backupName))) return false
-      existing.delete(tx.backupName)
-      delete mine.replacement
-      await saveState()
-      return true
-    }
-    if (hasBackup) {
-      if (hasOriginal) {
-        // An import completed just before the process exited. Both identities
-        // are recorded by this transaction; commit the valid listed candidate.
-        mine.hash = tx.nextHash
-        tx.phase = "installed"
-        await saveState()
-        return recoverSkillReplacement(id, mine, existing)
-      }
-      const restored = await run(skillCommand(mine.scope, "rename", tx.backupName, "--to", mine.name), { timeoutMs: 30_000 })
-      if (!restored.ok) {
-        log(`restoring previous skill ${mine.name} failed; backup retained: ${errMsg(restored)}`)
-        requestRetry("skill-restore")
-        return false
-      }
-      existing.delete(tx.backupName)
-      existing.add(mine.name)
-      mine.hash = tx.previousHash
-    } else if (!hasOriginal) {
-      log(`skill ${mine.name} replacement is incomplete; ownership retained for retry`)
-      requestRetry("skill-restore")
-      return false
-    }
-    delete mine.replacement
-    await saveState()
-    return true
-  }
-
-  const syncSkills = async (library) => {
-    if (!(await pruneSkills(library))) return
-    const bundles = opts.syncSkills ? await skillBundlesForRound(library) : new Map()
-    if (!bundles.size) return
-    for (const scope of resourcePlan.skillScopes) {
-      const sourceNames = new Set(desiredPlan.skills.get(scope)?.keys() ?? [])
-      const scopedBundles = scopedSkillBundles(bundles,sourceNames)
-      for (const [name,group] of scopedBundles) if (!group.bundle) {
-        const operation = await operations.begin('skills',scope,name,{conflictingSources:group.sources},['revoke-skills'])
-        await operations.finish(operation,false,[],{failureClass:'conflict'})
-        log(`skill "${name}" (${scope}) has conflicting library sources: ${group.sources.join(', ')}; existing import retained`)
-        requestRetry("skill-source-conflict")
-        diagnostics.retry("skill-source-conflict",["skills"],scope === "global" ? [] : [scope])
-      }
-      if (roundSkillPaths && !Object.values(state.skills).some(row => row.scope === scope && row.replacement) &&
-          ![...bundles.values()].some(bundle => sourceNames.has(bundle.sourceName) && bundle.dir && [...roundSkillPaths].some(path => within(bundle.dir,path) || within(path,bundle.dir)))) continue
-      const existing = await skillNames(scope)
-      if (!existing) continue
-      for (const [id, mine] of Object.entries(state.skills)) {
-        if (mine.scope === scope && mine.replacement && scopedBundles.get(mine.name)?.bundle !== null) await recoverSkillReplacement(id, mine, existing)
-      }
-      for (const [name, {bundle}] of scopedBundles) {
-        if (watching && pending) return
-        if (!bundle?.dir) continue
-        const { dir, hash, sourceName } = bundle
-        const id = `${scope}:${name}`
-        let mine = state.skills[id]
-        if (mine?.replacement || state.creations?.['skills:'+id]) continue
-        if (existing.has(name) && !mine) {
-          warnOnce(`skill:${id}`, `skill "${name}" exists in Ducoro (${scope}) and was not imported by this plugin; skipped`)
-          requestRetry("skill-conflict")
-          continue
-        }
-        if (mine?.hash === hash && existing.has(name)) { const op=await operations.begin('skills',scope,name,hash,['revoke-skills'],true); await operations.finish(op); continue }
-        const operation = await operations.begin('skills', scope, name, hash, ['revoke-skills'])
-        if (!operation) {requestRetry('skill-import');continue}
-        try {
-          const staged = await artifacts.prepare(name, bundle)
-          if (mine && existing.has(name)) {
-            let suffix = 0
-            let backupName
-            do { backupName = `magpie-backup-${sha256(id + hash).slice(0, 16)}${suffix ? `-${suffix}` : ""}`; suffix++ } while (existing.has(backupName))
-            mine.replacement = { backupName, previousHash: mine.hash, nextHash: hash, phase: "prepared" }
-            await saveState()
-            const backup = await run(skillCommand(scope, "rename", name, "--to", backupName), { timeoutMs: 30_000 })
-            if (!backup.ok) {
-              log(`backing up skill ${name} failed; update deferred: ${errMsg(backup)}`)
-              requestRetry("skill-backup")
-              await operations.finish(operation, false, [], Object.assign(Error(errMsg(backup)),commandFailure(backup)))
-              continue
-            }
-            existing.delete(name)
-            existing.add(backupName)
-            mine.replacement.phase = "backed-up"
-            await saveState()
-          }
-          if(!mine) {
-            state.creations??={};state.creations['skills:'+id]={kind:'skills',scope,name,sourceName,hash,dir,contentHash:(await skillFingerprint(staged,{includeModes:false})).hash};
-            await saveState();
-          }
-          const r = await run(skillCommand(scope, "import", staged), { timeoutMs: 60_000 })
-          if (r.ok) {
-            existing.add(name)
-            if(state.creations)delete state.creations['skills:'+id]
-            state.skills[id] = { scope, name, sourceName, hash, dir, ...(mine?.replacement ? { replacement: { ...mine.replacement, phase: "installed" } } : {}) }
-            mine = state.skills[id]
-            await saveState()
-            if (mine.replacement) await recoverSkillReplacement(id, mine, existing)
-            // A manifest rename should retire its old identity only after the
-            // replacement has successfully reached Ducoro.
-            for (const [oldId, old] of Object.entries(state.skills)) {
-              if (oldId !== id && old.scope === scope && old.sourceName === sourceName) await removeSkill(oldId, old)
-            }
-            await operations.finish(operation, !mine.replacement)
-            log(`skill ${name} imported (${scope})`)
-          } else {
-            log(`importing skill ${name} failed; restoring previous version: ${errMsg(r)}`)
-            await operations.finish(operation, false, [], Object.assign(Error(errMsg(r)),commandFailure(r)))
-            requestRetry("skill-import")
-            if (mine?.replacement) await recoverSkillReplacement(id, mine, existing)
-          }
-        } catch (e) {
-          invalidateSkillCache()
-          log(`preparing skill ${name} failed; existing import retained: ${e.message}`)
-          await operations.finish(operation, false, [], e)
-          requestRetry("skill-stage")
-        }
-      }
-    }
-  }
+  const syncTotal = createTotalSync({
+    operations,
+    opts: runtimeOpts,
+    paths,
+    run,
+    save: saveState,
+    getState: () => state,
+    requestRetry,
+    log,
+  })
 
   // -------------------------------------------------------------- flow
 
-  let disconnectNoted = false
-  let gatewayMissingSince = null
+  const handleDisconnected = async () => {
+    if (!state.connection) return
+    if (opts.onDisconnect === "remove") {
+      log("model disconnected; removing the bridge connection")
+      await removeConnection()
+    } else if (!disconnectNoted) {
+      disconnectNoted = true
+      log("model disconnected; connection kept (onDisconnect=keep)")
+    }
+  }
 
   const syncGateway = async (reason = "tick") => {
     const controller = new AbortController()
@@ -1028,19 +427,26 @@ const createEngine = (input = {}, options = {}) => {
         if (result.missing && state.connection) {
           gatewayMissingSince ??= Date.now()
           if (Date.now() - gatewayMissingSince >= 250) f = {}
-        } else if (result.missing) f = {}
+        } else if (result.missing) {
+          f = {}
+        }
         if (!f) {
           log("gateway configuration temporarily unreadable; keeping the connection")
           requestRetry("gateway-unreadable")
           return
         }
-      } else gatewayMissingSince = null
-      const plain = (value) => value && typeof value === "object" && !Array.isArray(value)
+      } else {
+        gatewayMissingSince = null
+      }
       const gateway = f?.gateway === undefined ? {} : f.gateway
       // A valid empty object is Magpie's restored/disconnected configuration.
       // Malformed or half-written gateway values are not a disconnect signal.
-      const valid = plain(f) && plain(gateway) && ["url", "v1", "key"].every((key) =>
-        gateway[key] === undefined || typeof gateway[key] === "string")
+      const valid =
+        isPlainObject(f) &&
+        isPlainObject(gateway) &&
+        ["url", "v1", "key"].every(
+          (key) => gateway[key] === undefined || typeof gateway[key] === "string",
+        )
       const gwUrl = str(gateway?.url)
       const key = str(gateway?.key)
       if (!valid || Boolean(gwUrl) !== Boolean(key)) {
@@ -1051,24 +457,36 @@ const createEngine = (input = {}, options = {}) => {
       rememberSecret(key)
       if (result.ok && !dryRun) {
         const info = await stat(paths.bridge).catch(() => null)
-        if (info && (info.mode & 0o777) !== 0o600) await chmod(paths.bridge, 0o600).catch(() => {})
+        if (info && (info.mode & 0o777) !== 0o600) {
+          await chmod(paths.bridge, 0o600).catch((e) =>
+            log(`could not tighten permissions on ${paths.bridge}: ${e?.message ?? e}`),
+          )
+        }
       }
-  
+
       const gwV1 = str(gateway.v1) || (gwUrl ? gwUrl.replace(/\/+$/, "") + "/v1" : "")
       const model = normalizeModel(f?.model)
       const models = modelIds(f?.models)
       const connected = Boolean(gwUrl && key)
-  
+
       if (!connected) {
         await handleDisconnected()
         diagnostics.stage("connection", "skipped")
         diagnostics.stage("models", "skipped")
-      } else disconnectNoted = false
-  
+      } else {
+        disconnectNoted = false
+      }
+
       log(`sync (${reason}): gateway ${gwUrl}, model ${model ?? "—"}, ${models.length} model(s)`)
-  
+
       if (connected && opts.syncConnection) {
-        const configured = await syncConnection({ gwUrl, gwV1, key, model, models, descriptors: f?.models })
+        const configured = await syncConnection({
+          gwV1,
+          key,
+          model,
+          models,
+          descriptors: f?.models,
+        })
         diagnostics.stage("connection", configured ? "configured" : "pending")
       }
     } catch (e) {
@@ -1081,46 +499,37 @@ const createEngine = (input = {}, options = {}) => {
     }
   }
 
-  const syncTotal = createTotalSync({ operations, opts: { ...opts, dryRun }, paths, run, save: saveState, getState: () => state, requestRetry: (...args) => requestRetry(...args), log })
-
-  let resourcePlan = null
-  let desiredPlan = null
   const resolveResourcePlan = async () => {
     validateResourceOptions(opts)
+    const needsTargets = needsResourceTargets(opts)
     let bots = []
-    if (needsResourceTargets(opts)) {
+    if (needsTargets) {
       const response = await run(["agent", "list"], { timeoutMs: 30_000 })
       if (!response.ok) throw new Error("cannot list resource target Bots; existing resources retained")
-      bots = Array.isArray(response.json) ? response.json : response.json?.agents ?? response.json?.bots
+      bots = Array.isArray(response.json)
+        ? response.json
+        : response.json?.agents ?? response.json?.bots
       if (!Array.isArray(bots)) {
         if (dryRun) bots = []
         else throw new Error("unrecognized resource target Bot list; existing resources retained")
       }
     }
     const plan = planResourceScopes(opts, bots)
-    if (needsResourceTargets(opts) && !plan.targets.length) {
+    if (needsTargets && !plan.targets.length) {
       log("no pi-agent Bots are bound to the Magpie connection for resource sync")
       requestRetry("resource-targets")
     }
     return plan
   }
 
-  let dirtySkillPaths = new Set()
-  let roundSkillPaths = null
-  let dirtyFeatures = new Set()
-  let roundFeatures = null
-  const wants = feature => !roundFeatures || roundFeatures.has(feature)
-  const classifyChange = path => {
-    if (path === paths.instructions) return ['total']
-    if (path === paths.mcp) return ['mcp']
-    if ([paths.bridge,paths.providers,paths.pluginProviders].includes(path)) return ['gateway']
-    if ([paths.skills,paths.librarySkills,...activeSkillRoots].some(root => within(root,path))) return ['skills']
-    return ['all']
-  }
+  const wants = (feature) => !roundFeatures || roundFeatures.has(feature)
+  const metricsSnapshot = () => ({ ...run.metrics(), ...fileMetrics, ...skills.metrics() })
+
   const syncAllUnlocked = async (reason = "tick") => {
-    forceMcpProbe = reason === "page-retry"
-    try { await loadState() }
-    catch (error) {
+    mcp.setForceProbe(reason === "page-retry")
+    try {
+      await loadState()
+    } catch (error) {
       diagnostics.retry(error.code)
       log(error.message)
       requestRetry(error.code)
@@ -1129,12 +538,14 @@ const createEngine = (input = {}, options = {}) => {
     const controls = await readOperationControls(stateDir)
     roundRetries = manualRetries.take(state.operations)
     if (roundRetries.size) roundSkillPaths = null
-    operations.reset({controls,retryIds:roundRetries})
-    const invalidOptions = [...validateOptions(rawOptions), ...validateOptions(opts)]
-    if (invalidOptions.length) {
+    operations.reset({ controls, retryIds: roundRetries })
+    if (initialInvalidOptions.length) {
       // Invalid access selections must never fall through to an inherited or
       // global resource plan. Diagnostics remain in memory for this round.
-      log("invalid plugin options:", invalidOptions.map(item => `${item.field}:${item.code}`).join(", "))
+      log(
+        "invalid plugin options:",
+        initialInvalidOptions.map((item) => `${item.field}:${item.code}`).join(", "),
+      )
       requestRetry("options-invalid")
       return
     }
@@ -1150,64 +561,110 @@ const createEngine = (input = {}, options = {}) => {
     if (library) {
       resourcePlan = null
       desiredPlan = null
-      try { resourcePlan = await resolveResourcePlan() } catch (e) {
+      try {
+        resourcePlan = await resolveResourcePlan()
+      } catch (e) {
         log("resource scope planning failed:", e?.message ?? e)
         requestRetry("resource-targets")
       }
       if (resourcePlan) {
         const exported = await readJson(paths.mcp)
-        desiredPlan = desiredResources({library, options:opts, scopes:resourcePlan, exported, exportReadable:!!exported, state, env:process.env})
+        desiredPlan = desiredResources({
+          library,
+          options: opts,
+          scopes: resourcePlan,
+          exported,
+          exportReadable: Boolean(exported),
+          state,
+          env: process.env,
+        })
         for (const issue of findUnavailableAssignments(library, opts, resourcePlan)) {
           diagnostics.retry("resource-selection-unavailable", [issue.kind], [issue.scope])
         }
       }
-      await syncResources({library,resourcePlan,wants,progress,pruneSkills,syncMcp,syncTotal,syncSkills,diagnostics,state,opts,requestRetry,log,setTotal:value=>{totalForRound=value}})
+      await syncResources({
+        library,
+        resourcePlan,
+        wants,
+        progress,
+        pruneSkills: (lib) => skills.pruneSkills(lib, { resourcePlan, desiredPlan }),
+        syncMcp: () => mcp.syncMcp({ resourcePlan, desiredPlan }),
+        syncTotal,
+        syncSkills: (lib) => skills.syncSkills(lib, { resourcePlan, desiredPlan, roundSkillPaths }),
+        diagnostics,
+        state,
+        opts,
+        requestRetry,
+        log,
+        setTotal: (value) => { totalForRound = value },
+      })
     }
     try {
-      if (wants("accounts")) await progress.step("accounts", () => syncAccountConnectors({ options: opts, state, run, save: saveState, operations }))
+      if (wants("accounts")) {
+        await progress.step("accounts", () =>
+          syncAccountConnectors({ options: opts, state, run, save: saveState, operations }),
+        )
+      }
     } catch (error) {
       log("account connector synchronization pending:", error.message)
       diagnostics.retry("account-connectors", ["mcp"])
       requestRetry("account-connectors")
     }
-    if (wants("gateway") && !stopped && (!watching || !pending)) await progress.step("models", () => syncGateway(reason))
+    if (wants("gateway") && !stopped && (!watching || !scheduler.isPending())) {
+      await progress.step("models", () => syncGateway(reason))
+    }
   }
 
   // Magpie CLI commands start their own plugin hosts while the app's host
   // stays alive. Serialize their writes and reload ownership each round so
   // an older host cannot overwrite another host's newly imported skills.
-  let syncing = false
   const syncAll = async (reason = "tick") => {
     if (stopped) return false
     manualRetries.add(reason)
     if (syncing) return false
     syncing = true
-    if (!watching || reason === "interval" || reason === "startup" || reason === "page-retry") invalidateSkillCache()
-    let releaseLock;
+    if (!watching || ["interval", "startup", "page-retry"].includes(reason)) {
+      skills.invalidateSkillCache()
+    }
+    let releaseLock
     try {
       if (!dryRun) {
-        releaseLock = await acquireSyncLock(stateDir,{recover:true});
-        if (!releaseLock) return false;
+        releaseLock = await acquireSyncLock(stateDir, { recover: true })
+        if (!releaseLock) return false
       }
-      const reviewFile=join(stateDir,'restore-review.json');
+      const reviewFile = join(stateDir, "restore-review.json")
       try {
-        const review=JSON.parse(await readFile(reviewFile,'utf8'));
-        if(!review.approved) { log('Restored management records await preview and manual synchronization'); return true }
-        await rm(reviewFile);
-      } catch(error) { if(error.code!=='ENOENT')throw error }
-      const changes = dirtyFeatures; dirtyFeatures = new Set()
-      const skillPaths = dirtySkillPaths; dirtySkillPaths = new Set()
-      roundFeatures = (reason.startsWith('retry:') || ['file-change','coalesced','page-retry-failed'].includes(reason) || reason.startsWith('page-operation:')) && changes.size && !changes.has('all') ? changes : null
+        const review = JSON.parse(await readFile(reviewFile, "utf8"))
+        if (!review.approved) {
+          log("Restored management records await preview and manual synchronization")
+          return true
+        }
+        await rm(reviewFile)
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error
+      }
+      const changes = dirtyFeatures
+      dirtyFeatures = new Set()
+      const skillPaths = dirtySkillPaths
+      dirtySkillPaths = new Set()
+      const scopedReason =
+        reason.startsWith("retry:") ||
+        ["file-change", "coalesced", "page-retry-failed"].includes(reason) ||
+        reason.startsWith("page-operation:")
+      roundFeatures = scopedReason && changes.size && !changes.has("all") ? changes : null
       roundSkillPaths = roundFeatures && skillPaths.size ? skillPaths : null
-      retryRequested = false
-      artifacts.reset()
-      roundSkillBundles = null
+      scheduler.consumeRetryRequested()
+      mcp.invalidateListCache()
+      skills.resetRound()
       roundRetries = null
       stateLoaded = false
-      state = { v: 2, connection: null, mcp: {}, skills: {} }
-      progress.begin(reason, { ...run.metrics(), ...fileMetrics, ...artifacts.metrics() })
+      state = emptyState()
+      progress.begin(reason, metricsSnapshot())
       diagnostics.begin(reason, roundFeatures)
-      if (!roundFeatures) { totalForRound = null; capabilitiesForRound = null }
+      if (!roundFeatures) {
+        totalForRound = null
+        capabilitiesForRound = null
+      }
       try {
         await syncAllUnlocked(reason)
       } catch (error) {
@@ -1215,11 +672,16 @@ const createEngine = (input = {}, options = {}) => {
         await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
         throw error
       }
-      if (pending) {
-        for (const feature of roundFeatures ?? ['all']) dirtyFeatures.add(feature)
+      if (scheduler.isPending()) {
+        for (const feature of roundFeatures ?? ["all"]) dirtyFeatures.add(feature)
         for (const path of roundSkillPaths ?? []) dirtySkillPaths.add(path)
       }
-      if (!dryRun && stateLoaded) { if (!roundFeatures && !pending && !retryRequested) await operations.retire(null); await maintainLocalRecords(stateDir,state,saveState) }
+      if (!dryRun && stateLoaded) {
+        if (!roundFeatures && !scheduler.isPending() && !scheduler.wasRetryRequested()) {
+          await operations.retire(null)
+        }
+        await maintainLocalRecords(stateDir, state, saveState)
+      }
       await diagnostics.complete({ state, total: totalForRound, capabilities: capabilitiesForRound })
       return true
     } finally {
@@ -1227,274 +689,188 @@ const createEngine = (input = {}, options = {}) => {
       // Carry those requests into the next round; new clicks stay in the queue.
       if (roundRetries) manualRetries.restore(operations.remainingRetries())
       roundRetries = null
-      try { if (releaseLock) await releaseLock() } finally {
-        try { progress.end({ ...run.metrics(), ...fileMetrics, ...artifacts.metrics() }) } finally { syncing = false }
+      try {
+        if (releaseLock) await releaseLock()
+      } finally {
+        try {
+          progress.end(metricsSnapshot())
+        } finally {
+          syncing = false
+        }
       }
       // Probing remote servers must not hold the mutation lock or delay a
       // subsequent Library event. Manual syncs still wait for their diagnostics.
       if (watching) {
-        if (!pending) void drainMcpProbes().catch((e) => { log("mcp probe error:", e?.message ?? e); requestRetry("mcp-probe") })
-        void refreshWatches()
-      } else await drainMcpProbes()
-    }
-  }
-
-  const handleDisconnected = async () => {
-    if (!state.connection) return
-    if (opts.onDisconnect === "remove") {
-      log("model disconnected; removing the bridge connection")
-      await removeConnection()
-    } else if (!disconnectNoted) {
-      disconnectNoted = true
-      log("model disconnected; connection kept (onDisconnect=keep)")
+        if (!scheduler.isPending()) {
+          void mcp.drainMcpProbes().catch((e) => {
+            log("mcp probe error:", e?.message ?? e)
+            requestRetry("mcp-probe")
+          })
+        }
+        void watchManager.refreshWatches()
+      } else {
+        await mcp.drainMcpProbes()
+      }
     }
   }
 
   // ------------------------------------------------------------ start
 
-  let watching = false
-  let stopped = false
-  let lifecycleGeneration = 0
-  let running = false
-  let pending = false
-  let syncTimer = null
-  let retryTimer = null
-  let interval = null
-  let watchFallback = null
-  let wakeFallback = () => {}
-  let watchDegraded = false
-  let activeRun = null
-  let retryDelay = 250
-  let retryRequested = false
-  let refreshPromise = null
-  let refreshAgain = false
-  const watchers = new Map()
+  const getProgress = () => progress.read()
+  const getReport = () => diagnostics.read({ syncing, watchDegraded })
+  const getModelCatalog = async (force) => ({
+    ...(await capabilityCatalog.snapshot(force)),
+    entriesUpdatedAt: capabilitiesForRound?.updatedAt ?? null,
+    entriesRoundId: capabilitiesForRound?.roundId ?? null,
+    syncing,
+    entries: (capabilitiesForRound?.entries ?? []).map(
+      ({ id, status, source, reference, commonCapabilities, warnings }) => ({
+        id,
+        status,
+        source,
+        reference,
+        commonCapabilities,
+        warnings,
+      }),
+    ),
+  })
 
-  const requestRetry = (reason, minDelay = 0) => {
-    progress.fail()
-    // Diagnostics also cover manual one-shot runs, where no retry timer runs.
-    // Total's per-resource report provides finer attribution than its shared
-    // retry signal; use that report rather than marking both resources failed.
-    if (reason !== "total-resource") diagnostics.retry(reason)
-    const feature = reason.startsWith('skill') ? 'skills' : reason.startsWith('mcp') ? 'mcp' : reason.startsWith('total') ? 'total' : reason.startsWith('account') ? 'accounts' : /model|connection|gateway/.test(reason) ? 'gateway' : 'all'
-    dirtyFeatures.add(feature)
-    retryRequested = true
-    if (!watching) return
-    if (retryTimer) return
-    retryTimer = setTimeout(() => {
-      retryTimer = null
-      trigger(`retry:${reason}`, 0)
-    }, Math.max(retryDelay,minDelay))
-    retryDelay = Math.min(60_000, retryDelay * 2)
-  }
-
-  // A bounded batch window, not a trailing debounce: continuous filesystem
-  // writes cannot postpone a user's selection indefinitely.
-  const trigger = (reason = "file-change", delay = 75) => {
-    if (!watching) return
-    if(reason.startsWith('page-operation:')) {
-      if(!manualRetries.add(reason))return
-      dirtyFeatures.add(reason.split(':')[2])
-    } else if (reason === 'page-retry-failed') {
-      manualRetries.add(reason)
-      // The persisted failed rows are authoritative, even if diagnostics are stale.
-      dirtyFeatures.add('all')
-    } else if (!reason.startsWith("retry:") && !["file-change","coalesced"].includes(reason)) dirtyFeatures.add("all")
-    if (reason === "file-change" || reason === "watch-fallback") interruptGatewayReads()
-    if (running) { pending = true; return }
-    if (syncTimer) return
-    syncTimer = setTimeout(() => {
-      syncTimer = null
-      running = true
-      retryRequested = false
-      activeRun = (async () => {
-        try {
-          if (await syncAll(reason) === false) requestRetry("host-lock")
-          if (!retryRequested) {
-            retryDelay = 250
-            clearTimeout(retryTimer)
-            retryTimer = null
-          }
-        } catch (e) {
-          log("sync failed:", e?.message ?? e)
-          requestRetry("sync-failed")
-        } finally {
-          running = false
-          if (pending && watching) {
-            pending = false
-            trigger("coalesced", 0)
-          }
-        }
-      })()
-    }, delay)
-  }
-
-  const refreshWatches = () => {
-    if (!watching) return Promise.resolve()
-    if (refreshPromise) { refreshAgain = true; return refreshPromise }
-    refreshPromise = (async () => {
-      do {
-        refreshAgain = false
-        const desired = new Map()
-        const add = (dir, recursive = false, name = null, info = null) => {
-          const entry = desired.get(dir) ?? { recursive: false, names: new Set(), info }
-          entry.recursive ||= recursive
-          if (name) entry.names.add(name)
-          if (info) entry.info = info
-          desired.set(dir, entry)
-        }
-        // Anchor a missing directory at its nearest existing ancestor. When
-        // Magpie creates it, attach the real watcher during the same event.
-        const observe = async (target, recursive, name = null) => {
-          let dir = target, child = name
-          let info = await stat(dir).catch(() => null)
-          while (!info?.isDirectory() && dirname(dir) !== dir) {
-            child = basename(dir)
-            dir = dirname(dir)
-            info = await stat(dir).catch(() => null)
-          }
-          if (info?.isDirectory()) add(await realpath(dir), dir === target && recursive, child, info)
-        }
-        for (const file of [paths.bridge, paths.mcp, paths.library, paths.instructions, paths.providers, paths.pluginProviders]) {
-          await observe(dirname(file), false, basename(file))
-          await observe(dirname(dirname(file)), false, basename(dirname(file)))
-        }
-        const roots = new Set([paths.skills, paths.librarySkills, ...activeSkillRoots])
-        for (const dir of roots) {
-          await observe(dir, true)
-          await observe(dirname(dir), false, basename(dir))
-        }
-        // A recursive root already covers its physical subdirectories.
-        for (const dir of [...desired.keys()]) {
-          if ([...desired].some(([parent, entry]) => parent !== dir && entry.recursive && within(parent,dir,{allowRoot:false}))) desired.delete(dir)
-        }
-        if (!watching) break
-        watchDegraded = false
-        for (const [dir, entry] of watchers) {
-          const want = desired.get(dir)
-          if (!want || want.recursive !== entry.recursive || want.info?.ino !== entry.ino || want.info?.dev !== entry.dev) {
-            entry.watcher.close()
-            watchers.delete(dir)
-          } else entry.names = want.names
-        }
-        for (const [dir, want] of desired) {
-          if (watchers.has(dir)) continue
-          try {
-            const entry = { ...want, ino: want.info?.ino, dev: want.info?.dev }
-            const watcher = fsWatch(dir, { recursive: want.recursive }, (_event, filename) => {
-              const name = filename == null ? null : String(filename).split(/[\\/]/)[0]
-              if (!entry.recursive && name && !entry.names.has(name)) return
-              const changedPath = filename == null ? dir : join(dir,String(filename))
-              if (_event === 'change' && Object.values(paths).some(path => dirname(path) === changedPath)) { void refreshWatches(); return }
-              const features = classifyChange(changedPath)
-              for (const feature of features) dirtyFeatures.add(feature)
-              if (features.includes('all')) invalidateSkillCache()
-              else if (features.includes('skills')) {
-                dirtySkillPaths.add(changedPath)
-                skillCacheGeneration++
-                for (const root of skillBundleCache.keys()) if (within(root,changedPath) || within(changedPath,root)) skillBundleCache.delete(root)
-              }
-              trigger("file-change")
-              void refreshWatches()
-            })
-            entry.watcher = watcher
-            watcher.on("error", (error) => {
-              watchDegraded = true
-              wakeFallback()
-              warnOnce(`watch:${dir}:${error?.code}`, `watch error (${error?.code ?? "unknown"}): ${dir}; using short reconciliation fallback`)
-              watcher.close()
-              if (watchers.get(dir) === entry) watchers.delete(dir)
-              diagnostics.retry("watch-error")
-            })
-            watchers.set(dir, entry)
-          } catch { watchDegraded = true; wakeFallback(); diagnostics.retry("watch-missing") }
-        }
-      } while (refreshAgain && watching)
-    })().catch((e) => {
-      log("watch refresh failed:", e?.message ?? e)
-      diagnostics.retry("watch-refresh")
-    }).finally(() => { refreshPromise = null })
-    return refreshPromise
-  }
-
-  let pageService = null
   const start = async () => {
     if (watching) return
     const generation = ++lifecycleGeneration
     stopped = false
     // Watch callbacks use canonical directories; source paths must use the same
     // spelling (macOS /var and /private/var otherwise classify every event as full).
-    for (const [key,path] of Object.entries(paths)) paths[key] = await realpath(path).catch(async () => join(await realpath(dirname(path)).catch(() => dirname(path)),basename(path)))
+    await Promise.all(
+      Object.entries(paths).map(async ([key, path]) => {
+        paths[key] = await realpath(path).catch(async () =>
+          join(await realpath(dirname(path)).catch(() => dirname(path)), basename(path)),
+        )
+      }),
+    )
     watching = true
-    if (!dryRun) await removeLegacyReports(stateDir)
-    if (!dryRun) pageService = await createPageService({ options: rawOptions, paths, stateDir, run, trigger, getProgress: () => progress.read(),
-    getReport: () => diagnostics.read({ syncing, watchDegraded }),
-      getModelCatalog: async force => ({ ...(await capabilityCatalog.snapshot(force)), entriesUpdatedAt:capabilitiesForRound?.updatedAt??null, entriesRoundId:capabilitiesForRound?.roundId??null, syncing, entries: (capabilitiesForRound?.entries ?? []).map(({id,status,source,reference,commonCapabilities,warnings}) => ({id,status,source,reference,commonCapabilities,warnings})) }), log })
-    await refreshWatches()
-    if (!watching || generation !== lifecycleGeneration) return
-    trigger("startup", 0)
-    // Watch failures (OS limits, unsupported recursive watch) must not silently
-    // turn resource changes into a two-minute wait. This path is normally idle.
-    let fallbackRequired = false
-    const poll = createFallbackPoll({
-      fingerprint: () => sourceFingerprint([paths.bridge,paths.mcp,paths.library,paths.instructions,paths.providers,paths.pluginProviders,paths.skills,paths.librarySkills,...activeSkillRoots]),
-      refresh: () => refreshWatches(),
-      changed: () => { if (fallbackRequired) { invalidateSkillCache(); trigger("watch-fallback", 0) } },
-    })
-    await poll()
-    if (!watching || generation !== lifecycleGeneration) return
-    const checkFallback = async () => {
+    try {
+      if (!dryRun) await removeLegacyReports(stateDir)
+      if (!dryRun) {
+        pageService = await createPageService({
+          options: rawOptions,
+          paths,
+          stateDir,
+          run,
+          trigger,
+          getProgress,
+          getReport,
+          getModelCatalog,
+          log,
+        })
+      }
+      await watchManager.refreshWatches()
       if (!watching || generation !== lifecycleGeneration) return
-      let delay = 1000
-      try { fallbackRequired = watchDegraded; delay = await poll() } catch { /* Next scan retries without interrupting gateway reads. */ }
-      if (watching && generation === lifecycleGeneration) {
-        watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 300000)
+      trigger("startup", 0)
+      // Watch failures (OS limits, unsupported recursive watch) must not silently
+      // turn resource changes into a two-minute wait. This path is normally idle.
+      let fallbackRequired = false
+      const poll = createFallbackPoll({
+        fingerprint: () =>
+          sourceFingerprint([
+            paths.bridge,
+            paths.mcp,
+            paths.library,
+            paths.instructions,
+            paths.providers,
+            paths.pluginProviders,
+            paths.skills,
+            paths.librarySkills,
+            ...skills.activeSkillRoots(),
+          ]),
+        refresh: () => watchManager.refreshWatches(),
+        changed: () => {
+          if (fallbackRequired) {
+            skills.invalidateSkillCache()
+            trigger("watch-fallback", 0)
+          }
+        },
+      })
+      await poll()
+      if (!watching || generation !== lifecycleGeneration) return
+      const checkFallback = async () => {
+        if (!watching || generation !== lifecycleGeneration) return
+        let delay = 1000
+        try {
+          fallbackRequired = watchDegraded
+          delay = await poll()
+        } catch (e) {
+          log("watch fallback scan deferred:", e?.message ?? e)
+        }
+        if (watching && generation === lifecycleGeneration) {
+          watchFallback = setTimeout(checkFallback, watchDegraded ? delay : 300000)
+          watchFallback.unref?.()
+        }
+      }
+      wakeFallback = () => {
+        clearTimeout(watchFallback)
+        watchFallback = setTimeout(checkFallback, 0)
         watchFallback.unref?.()
       }
+      watchFallback = setTimeout(checkFallback, 1000)
+      watchFallback.unref?.()
+      interval = setInterval(() => {
+        void watchManager.refreshWatches()
+        trigger("interval", 0)
+      }, Math.max(30_000, Number(opts.intervalMs) || DEFAULTS.intervalMs))
+      interval.unref?.()
+      log(`bridge started (state: ${stateFile}, dry-run: ${dryRun})`)
+    } catch (error) {
+      await stop()
+      throw error
     }
-    wakeFallback = () => {clearTimeout(watchFallback);watchFallback=setTimeout(checkFallback, 0);watchFallback.unref?.();}
-    watchFallback = setTimeout(checkFallback, 1000)
-    watchFallback.unref?.()
-    interval = setInterval(() => {
-      void refreshWatches()
-      trigger("interval", 0)
-    }, Math.max(30_000, Number(opts.intervalMs) || DEFAULTS.intervalMs))
-    interval.unref?.()
-    log(`bridge started (state: ${stateFile}, dry-run: ${dryRun})`)
   }
 
   const stop = async () => {
     lifecycleGeneration++
-    await pageService?.close()
-    pageService = null
     stopped = true
     watching = false
-    interruptGatewayReads()
-    authorizedMcpSlugs.clear()
-    pendingMcpProbes.clear()
-    pending = false
-    clearTimeout(syncTimer)
-    clearTimeout(retryTimer)
+    scheduler.clearTimers()
     clearInterval(interval)
     clearTimeout(watchFallback)
-    syncTimer = retryTimer = interval = null
-    for (const { watcher } of watchers.values()) watcher.close()
-    watchers.clear()
-    await refreshPromise
-    await activeRun
-    await drainMcpProbes()
+    interval = watchFallback = null
+    interruptGatewayReads()
+    watchManager.closeAll()
+    const svc = pageService
+    pageService = null
+    await svc?.close()
+    await watchManager.waitForRefresh()
+    await scheduler.waitForActiveRun()
+    mcp.clearProbes()
+    await mcp.drainMcpProbes()
+    scheduler.reset()
+    wakeFallback = () => {}
+    watchDegraded = false
+    dirtyFeatures.clear()
+    dirtySkillPaths.clear()
+    roundFeatures = null
+    roundSkillPaths = null
+    logger.clearWarned()
     manualRetries.clear()
+    disconnectNoted = false
+    gatewayMissingSince = null
   }
 
   return {
-    opts, paths, stateFile, start, stop, syncAll, trigger, drainMcpProbes,
-    getProgress: () => progress.read(),
-    getReport: () => diagnostics.read({ syncing, watchDegraded }),
+    opts,
+    paths,
+    stateFile,
+    start,
+    stop,
+    syncAll,
+    trigger,
+    drainMcpProbes: mcp.drainMcpProbes,
+    getProgress,
+    getReport,
     get state() { return state },
     get currentResourceTargets() { return resourcePlan ? [...resourcePlan.targets] : null },
-    get watchedPaths() { return [...watchers.keys()] },
+    get watchedPaths() { return watchManager.watchedPaths() },
   }
-
 }
 
 // ---------------------------------------------------------------- plugin
@@ -1509,26 +885,12 @@ export default { id: "magpie-ducoro", server: DucoroBridge }
 
 export const _internal = {
   createEngine,
-  materializeSecrets,
   DEFAULTS,
-  DEFAULT_PATHS,
-  sha256,
-  slugify,
-  str,
-  normalizeModel,
-  modelIds,
-  parseLibMcp,
-  mapServer,
-  defHash,
-  skillName,
-  compatibleSkillMarkdown,
-  sameSet,
-  sameObj,
 }
 
 // ------------------------------------------------------------ self-test
 
-// bun bridge.mjs --selftest   (paths via DUCORO_BRIDGE_FILE / _MCP_FILE /
+// node bridge.mjs   (paths via DUCORO_BRIDGE_FILE / _MCP_FILE /
 // _SKILLS_DIR / _STATE_DIR; runs one syncAll in dry-run unless
 // DUCORO_BRIDGE_LIVE=1)
 if (
@@ -1545,7 +907,10 @@ if (
   )
   let synced = false
   for (let attempt = 0; attempt < 40; attempt++) {
-    if (await engine.syncAll("selftest")) { synced = true; break }
+    if (await engine.syncAll("selftest")) {
+      synced = true
+      break
+    }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   if (!synced) {

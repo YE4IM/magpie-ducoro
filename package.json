@@ -17,8 +17,6 @@
   "type": "module",
   "main": "./bridge.mjs",
   "keywords": [
-    "opencode",
-    "opencode-plugin",
     "magpie",
     "ducoro",
     "provider",

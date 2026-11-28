@@ -27,12 +27,7 @@
     let syncWatch = 0;
     let hasReport = false;
     let reportBusy = false;
-    const node = (tag, text, className) => {
-      const el = document.createElement(tag);
-      if (text !== undefined) DucoroI18n.setText(el, text);
-      if (className) el.className = className;
-      return el;
-    };
+    const { make: node, confirmDialog } = globalThis.DucoroComponents;
     const message = (text, error = false, target = "message") => {
       const el = $(target);
       if (!el) return;
@@ -300,8 +295,11 @@
           ? null
           : row.querySelector(".ref-value").value.trim();
         if (Object.hasOwn(options.modelCapabilityRefs, route))
-          throw DucoroI18n.error(
-            t`模型 ${route || t("（空名称）")} 重复，请仅保留一条映射。`,
+          throw Object.assign(
+            DucoroI18n.error(
+              t`模型 ${route || t("（空名称）")} 重复，请仅保留一条映射。`,
+            ),
+            { field: "references" },
           );
         Object.defineProperty(options.modelCapabilityRefs, route, {
           value: ref,
@@ -330,11 +328,14 @@
       return draftWrite;
     };
     const project = options => Object.fromEntries(EDITABLE_KEYS.map(key => [key, options[key]]));
-    const persistDraft = () => {
+    const persistDraft = (edited = null, collectError = null) => {
       if(panel || !ready || busy)return;
-      if(!hasChanges()&&!globalThis.DucoroPlanEditor?.snapshot()?.dirty){if(!draftTouched)return;draftTouched=false;pendingDraft={clear:true};clearTimeout(draftTimer);draftTimer=setTimeout(()=>void flushDraft(),350);return;}
+      if(!hasChanges(edited, collectError)&&!globalThis.DucoroPlanEditor?.snapshot()?.dirty){if(!draftTouched)return;draftTouched=false;pendingDraft={clear:true};clearTimeout(draftTimer);draftTimer=setTimeout(()=>void flushDraft(),350);return;}
       draftTouched=true;
-      try{pendingDraft={base:project(baseline),options:project(collect()),editor:globalThis.DucoroPlanEditor?.snapshot()??null};}
+      try{
+        if (collectError) throw collectError;
+        pendingDraft={base:project(baseline),options:project(edited ?? collect()),editor:globalThis.DucoroPlanEditor?.snapshot()??null};
+      }
       catch(error){DucoroI18n.setText(draftStatus,t('草稿保存失败')+': '+error.message);return;}
       clearTimeout(draftTimer);draftTimer=setTimeout(()=>void flushDraft(),350);
     };
@@ -350,15 +351,16 @@
     document.addEventListener('ducoro-editor-change',()=>{dirty();persistDraft();});
     globalThis.DucoroWorkspace = { collect, saved: () => structuredClone(baseline), ready: () => ready && !busy, dirty: () => hasChanges(), stage(options) { if (!ready || busy) throw DucoroI18n.error(t("请等待当前操作完成")); undoDraft=collect(); populate(optionsForDisplay(options), true); $("save-bar").hidden = false; dirty(); message(t("修改已加入草稿，请预览并保存。")); document.dispatchEvent(new Event("ducoro-workspace")); } };
 
-    function hasChanges() {
+    function hasChanges(edited = null, collectError = null) {
       if (!ready) return false;
       if(globalThis.DucoroPlanEditor?.snapshot()?.dirty)return true;
+      if (collectError) return true;
       let changed = true;
       try {
-        const edited = collect();
+        const snapshot = edited ?? collect();
         changed = (panel ? SWITCHES.map(([key]) => key) : EDITABLE_KEYS).some(
           (key) =>
-            JSON.stringify(edited[key]) !== JSON.stringify(baseline[key]),
+            JSON.stringify(snapshot[key]) !== JSON.stringify(baseline[key]),
         );
       } catch {
         /* Duplicate/incomplete rows remain editable and are validated on save. */
@@ -368,17 +370,26 @@
 
     function dirty() {
       if (!ready || busy) return;
-      const changed = hasChanges();
-      if(!panel){try{DucoroResources.updateSettings(collect());}catch{}}
+      let edited = null;
+      let collectError = null;
+      try {
+        edited = collect();
+      } catch (error) {
+        collectError = error;
+      }
+      const changed = hasChanges(edited, collectError);
+      if(!panel && edited){try{DucoroResources.updateSettings(edited);}catch{}}
       undoButton.disabled=!undoDraft;
       const editorDirty=globalThis.DucoroPlanEditor?.snapshot()?.dirty;
-      let changeCount;try{const edited=collect();changeCount=EDITABLE_KEYS.filter(key=>JSON.stringify(edited[key])!==JSON.stringify(baseline[key])).length;}catch{changeCount=t("待校验");}
+      const changeCount = edited
+        ? EDITABLE_KEYS.filter(key => JSON.stringify(edited[key]) !== JSON.stringify(baseline[key])).length
+        : t("待校验");
       DucoroI18n.setText(
         $("dirty-state"),
         editorDirty ? t("方案编辑待加入配置；预览时将一并处理") : changed ? t`${changeCount} 类设置待保存 · Bot 影响请预览确认` : t("设置与已读取配置一致"),
       );
       $("save").disabled = !changed;
-      persistDraft();
+      persistDraft(edited, collectError);
     }
 
     function setBusy(value) {
@@ -411,7 +422,6 @@
         baseline = optionsForDisplay(raw ?? {});
         populate(baseline);
         ready = true;
-        document.dispatchEvent(new Event("ducoro-workspace"));
         message("");
         setBusy(false);
         document.dispatchEvent(new Event("ducoro-workspace"));
@@ -488,7 +498,16 @@
           void followSync(savedAt, watch);
         }
       } catch (error) {
-        const text=String(error.localizedMessage??error.message),sourceKey=error.localizedMessage?.key??text;const field=/连接标识/.test(sourceKey)?$("connectionSlug"):/目标 Bot/.test(sourceKey)?$("targetAgents"):/子代理名称/.test(sourceKey)?$("subagentNames"):/模型映射|模型 .*重复/.test(sourceKey)?$("references").querySelector("input"):null;if(field)DucoroComponents.fieldError(field,error.localizedMessage??text);
+        const text = String(error.localizedMessage ?? error.message);
+        const fieldMap = {
+          connectionSlug: () => $("connectionSlug"),
+          targetAgents: () => $("targetAgents"),
+          subagentNames: () => $("subagentNames"),
+          officialProviders: () => $("officialProviders"),
+          references: () => $("references")?.querySelector("input"),
+        };
+        const field = error.field && fieldMap[error.field]?.();
+        if (field) DucoroComponents.fieldError(field, error.localizedMessage ?? text);
         message(
           error.localizedMessage ?? (error.message || t("保存失败，请重试。")),
           true,
@@ -536,35 +555,11 @@
     }
 
     function confirmReload() {
-      return new Promise((resolve) => {
-        const dialog = node("dialog", undefined, "preview-dialog");
-        const title = node("h2", t("放弃未保存的修改？"));
-        title.id = "reload-title";
-        dialog.setAttribute("aria-labelledby", title.id);
-        dialog.append(
-          title,
-          node("p", t("重新读取会用已预览并保存替换当前草稿。")),
-        );
-        const footer = node("footer", undefined, "button-group");
-        const cancel = node("button", t("返回修改"), "secondary");
-        const confirm = node("button", t("放弃修改并重新读取"), "primary");
-        cancel.type = confirm.type = "button";
-        cancel.addEventListener("click", () => dialog.close());
-        confirm.addEventListener("click", () => dialog.close("reload"));
-        footer.append(cancel, confirm);
-        dialog.append(footer);
-        dialog.addEventListener(
-          "close",
-          () => {
-            const accepted = dialog.returnValue === "reload";
-            dialog.remove();
-            resolve(accepted);
-          },
-          { once: true },
-        );
-        document.body.append(dialog);
-        dialog.showModal();
-        cancel.focus();
+      return confirmDialog({
+        title: t("放弃未保存的修改？"),
+        body: [t("重新读取会用已预览并保存替换当前草稿。")],
+        cancelLabel: t("返回修改"),
+        confirmLabel: t("放弃修改并重新读取"),
       });
     }
 

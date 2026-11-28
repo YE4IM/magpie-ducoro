@@ -79,25 +79,27 @@
     });
     globalThis.ducoroApi = async (path, body, { signal, inventoryToken } = {}) => {
       const deadline = Date.now() + (path === "preview" ? 45000 : 25000);
+      const payload = body === undefined ? undefined : JSON.stringify(body);
+      const keepalive = path === "draft" && payload !== undefined && new TextEncoder().encode(payload).length < 60000;
       let response;
       for (let attempt = 0; ; attempt++) {
         try {
           signal?.throwIfAborted();
           response = await fetch(`api/${path}`, {
-            method: body === undefined ? "GET" : "POST",
+            method: payload === undefined ? "GET" : "POST",
             cache: "no-store",
-            keepalive: path === "draft" && body !== undefined && new TextEncoder().encode(JSON.stringify(body)).length < 60000,
+            keepalive,
             headers: {
               ...(inventoryToken ? {'x-ducoro-inventory':inventoryToken} : {}),
               "X-Ducoro-Language": document.documentElement.lang,
               "X-Ducoro-Token": document.querySelector(
                 'meta[name="ducoro-token"]',
               ).content,
-              ...(body === undefined
+              ...(payload === undefined
                 ? {}
                 : { "Content-Type": "application/json" }),
             },
-            body: body === undefined ? undefined : JSON.stringify(body),
+            body: payload,
             signal: AbortSignal.any([
               ...(signal ? [signal] : []),
               AbortSignal.timeout(
